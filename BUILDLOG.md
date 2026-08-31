@@ -411,8 +411,17 @@ taken after the Blob exists understate what the process is holding.
 - **Sort by range is in, and it is a judgement call.** It puts the channels that
   travelled furthest at the top, which is the difference between a usable tool
   and 52 checkboxes. It is descriptive, it is labelled in the UI as a sort order
-  and nothing more, and model order is one click away. If it feels like the tool
-  pointing at an answer, delete it, the code is four lines.
+  and nothing more, and model order is one click away. Kept after review, with
+  the condition that nothing cleverer is ever layered on top of either order.
+- **Nothing is plotted until a channel is picked.** The first version auto-
+  selected the widest-ranging channel so the chart would not be empty on open.
+  That is the page nominating a channel as the interesting one, which is the
+  single judgement it exists not to make, so it is gone. The empty chart says
+  "pick a channel below" instead.
+- **Both sort orders are one keystroke as well as one click.** `s` toggles
+  between them, and the key is written next to the buttons, because a shortcut
+  nobody can see does not exist. Two orders, both plain, neither ranked above
+  the other.
 - **Colour belongs to a channel, not to a position.** Selections are held in
   eight fixed colour slots, so unpicking one series never repaints the others.
 - **Eight series maximum**, because that is how many colours are distinguishable
@@ -479,6 +488,34 @@ taken after the Blob exists understate what the process is holding.
   file. The viewer makes this more noticeable, not less: the obvious next thing
   when looking at a ten minute trace is wanting to label a stretch of it.
 - `lib/access/types.ts` is still a first sketch. Nothing depends on it.
+
+**The harness is committed now, in `test-harness/`:**
+
+`soak-test.mjs`, `verify-viewer.mjs` and `serialize-probe.mjs`, with a README
+covering how to run each and the exact `ffmpeg` command that builds the fake
+camera source. They were throwaway scripts in a temp directory; every number in
+this entry came out of them, and none of it would have been reproducible next
+week.
+
+Playwright is deliberately **not** a dependency. It resolves at runtime, from
+normal resolution or a `PLAYWRIGHT` env var, and prints install instructions if
+neither works. A project whose entire build is a static export should not carry
+browser downloads for three scripts that run by hand a few times a month.
+
+`soak-test.mjs` is the regression test for what comes next: once `GestureSwitch`
+runs on every frame, the question is whether it costs frames, and that shows up
+here as a sample rate that no longer holds at 15 Hz under the same ten minute
+conditions.
+
+**End of the pure-infrastructure phase.**
+
+Everything up to here is plumbing: camera, model, detection loop, recorder,
+deployment, viewer, harness. None of it decides anything about a person. The
+next commit that matters is `GestureSwitch`, and it gets written against real
+recorded traces rather than guessed at, which is the entire reason the recorder
+and the viewer exist.
+
+The four stubs are still untouched, and still throw.
 
 **Next:**
 

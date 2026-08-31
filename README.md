@@ -82,6 +82,10 @@ lib/
     ScanEngine.ts       STUB. Linear and row-column scanning.
 scripts/
   sync-mediapipe-assets.mjs
+test-harness/         Run by hand, not on every commit. See its README.
+  soak-test.mjs       Long recording session, with heap measurements
+  verify-viewer.mjs   Does /viewer actually draw the file
+  serialize-probe.mjs What the export costs at the moment it runs
 public/
   models/               Face Landmarker bundle, committed
   mediapipe/wasm/       WASM runtime, generated, gitignored
@@ -175,7 +179,9 @@ df.index.name = "t_ms"
 pick it with the file button; it is read in the tab and not uploaded.
 
 - Every channel gets a thumbnail, so it is possible to scan all 52 at once and
-  see which ones moved.
+  see which ones moved. Two sort orders, both one click or the `s` key: the
+  model's own order, or how far each value travelled in this file. Nothing is
+  plotted until you pick it.
 - Up to eight can be plotted together on the big chart. Drag across it to zoom
   into a stretch of time, double click to zoom back out, hover to read values
   off the traces.
