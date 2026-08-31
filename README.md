@@ -6,8 +6,12 @@ gesture, measures how well each method actually works for them, and gives them
 a working communication board to use during the months they spend waiting for
 funding approval on a dedicated device.
 
-**Status: scaffolding.** The sensing layer runs. None of the access methods are
-implemented yet.
+**Status: scaffolding.** The sensing layer runs and records. None of the access
+methods are implemented yet.
+
+Live at **https://aid-blond.vercel.app**, with the debug page at
+[/debug](https://aid-blond.vercel.app/debug). Camera access needs https, which
+that URL provides, so it works from a phone.
 
 ## What this is not
 
@@ -102,10 +106,73 @@ no longer matches its contents, and writes both paths into
 `lib/vision/assetPaths.generated.ts`, which is committed. Upgrading MediaPipe
 produces a lockfile diff and a path diff in the same commit.
 
+## Recording sessions
+
+`/debug` can capture the blendshape stream to a JSON file, so thresholds can be
+chosen from real data rather than guessed. Label the recording, press start, do
+the gesture, press stop, download. The file is built in the tab and saved
+locally; nothing is uploaded.
+
+The format is built to load straight into pandas without reshaping:
+
+```jsonc
+{
+  "format": "aid-blendshape-recording",
+  "version": 1,
+  "label": "jawOpen x10 slow",
+  "recordedAt": "2026-08-31T12:20:21.000Z",
+  "sampleRateHz": 15,
+  "durationMs": 30000,
+  "sampleCount": 450,
+  "blendshapeNames": ["_neutral", "browDownLeft", "..."],
+  "device": { "userAgent": "...", "capture": {}, "delegate": "GPU" },
+  "samples": [
+    { "t": 0, "faceDetected": true, "v": [0.0, 0.12, 0.03] }
+  ]
+}
+```
+
+`v` is positional against `blendshapeNames`, which keeps a ten minute session to
+a few megabytes instead of tens. It is `null`, not zeros, when no face was
+detected: zeros would claim a reading of a neutral face, which is a different
+thing from the absence of a reading. Note that `blendshapeNames` is read off the
+model the first time a face appears, so a recording with no face in it has an
+empty name list.
+
+`sampleRateHz` is the target. Trust each sample's `t` instead, which is
+milliseconds since the recording started. Measured spacing is 14.9 Hz from both
+15 and 30 fps cameras; a camera running near 20 fps comes out slightly fast, at
+about 17 Hz, because the resampler is allowed to take a frame half an interval
+early.
+
+Loading one:
+
+```python
+import json, pandas as pd
+rec = json.load(open("aid-jawopen-x10-slow-2026-08-31T12-20-21.json"))
+df = pd.DataFrame(
+    [s["v"] for s in rec["samples"] if s["faceDetected"]],
+    columns=rec["blendshapeNames"],
+    index=[s["t"] for s in rec["samples"] if s["faceDetected"]],
+)
+df.index.name = "t_ms"
+```
+
 ## Deploying
 
-Vercel, no configuration needed. `npm run build` triggers the WASM sync through
+Vercel, no configuration needed. `npm run build` triggers the asset sync through
 its `prebuild` hook, so a clean clone deploys correctly.
+
+Deploys are currently manual, from this directory:
+
+```bash
+npx vercel deploy --prod
+```
+
+Push-to-deploy is not connected yet. `vercel git connect` fails with "You need
+to add a Login Connection to your GitHub account first", which needs a GitHub
+login method added to the Vercel account in the browser. Once that is done,
+`npx vercel git connect` links the repo and every push to `main` deploys.
 
 The site is currently set to `noindex`. An unfinished AAC tool turning up in
 search results and being found by a family who needs one is a worse failure
