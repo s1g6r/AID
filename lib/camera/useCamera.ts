@@ -91,6 +91,17 @@ function describe(err: unknown): CameraError {
         hint: "Quit video call apps such as Zoom, Meet, Teams or Photo Booth, then try again.",
         cause: name,
       };
+    case "NotSupportedError":
+      // Not in the getUserMedia spec's rejection list, but Chromium emits it
+      // from builds whose media stack cannot capture at all. Observed in
+      // headless Chromium, where it is returned regardless of permission
+      // state or whether a device exists.
+      return {
+        status: "unsupported",
+        message: "This browser cannot capture from a camera.",
+        hint: "Use a current version of Chrome, Edge, Firefox or Safari, in a normal window rather than a private or kiosk mode.",
+        cause: name,
+      };
     case "SecurityError":
       return {
         status: "insecure-context",
