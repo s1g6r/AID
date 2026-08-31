@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FaceLandmarkerResult } from "@mediapipe/tasks-vision";
 import { useCamera } from "@/lib/camera/useCamera";
@@ -353,6 +354,14 @@ export default function DebugPage() {
                 saved {savedAs}
               </p>
             )}
+
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              Open a saved file in{" "}
+              <Link href="/viewer" className="underline underline-offset-2">
+                the viewer
+              </Link>{" "}
+              to plot it.
+            </p>
           </section>
         </div>
 

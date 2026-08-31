@@ -56,6 +56,12 @@ address on your LAN does not, so testing on a tablet means an https tunnel.
 app/
   page.tsx              Landing page
   debug/page.tsx        Live camera and all 52 blendshapes
+  viewer/
+    page.tsx            Plots a saved recording. Drawing only.
+    DetailChart.tsx     The big chart: axes, crosshair, drag to zoom
+    Sparkline.tsx       One channel at thumbnail size
+    TraceCanvas.tsx     Device-pixel canvas that redraws on resize
+    plot.ts             Series colours, decimation, the line drawing
 lib/
   camera/useCamera.ts   getUserMedia with named, recoverable failure states
   vision/
@@ -63,6 +69,10 @@ lib/
     useFaceLandmarker.ts  requestAnimationFrame detection loop
     blendshapes.ts      The 52 names, typed
     assetPaths.generated.ts  Content-hashed asset paths, generated
+  recording/
+    types.ts            On-disk shape of a recording
+    useBlendshapeRecorder.ts  Captures the stream, builds the JSON
+    loadRecording.ts    Reads a file back. Descriptive only.
   access/
     types.ts            Shared AccessMethod contract
     GestureSwitch.ts    STUB. One blendshape becomes one switch.
@@ -132,18 +142,19 @@ The format is built to load straight into pandas without reshaping:
 }
 ```
 
-`v` is positional against `blendshapeNames`, which keeps a ten minute session to
-a few megabytes instead of tens. It is `null`, not zeros, when no face was
+`v` is positional against `blendshapeNames`. A measured ten minute session at
+15 Hz is 9,028 samples and 9.6 MB, about 1.1 KB per sample; the same data as 52
+key/value pairs per sample would be several times that. It is `null`, not zeros, when no face was
 detected: zeros would claim a reading of a neutral face, which is a different
 thing from the absence of a reading. Note that `blendshapeNames` is read off the
 model the first time a face appears, so a recording with no face in it has an
 empty name list.
 
 `sampleRateHz` is the target. Trust each sample's `t` instead, which is
-milliseconds since the recording started. Measured spacing is 14.9 Hz from both
-15 and 30 fps cameras; a camera running near 20 fps comes out slightly fast, at
-about 17 Hz, because the resampler is allowed to take a frame half an interval
-early.
+milliseconds since the recording started. Measured spacing is 14.9 to 15.0 Hz
+from both 15 and 30 fps cameras, and holds there for at least ten minutes; a
+camera running near 20 fps comes out slightly fast, at about 17 Hz, because the
+resampler is allowed to take a frame half an interval early.
 
 Loading one:
 
@@ -157,6 +168,27 @@ df = pd.DataFrame(
 )
 df.index.name = "t_ms"
 ```
+
+## Viewing a recording
+
+`/viewer` opens an exported file and plots it. Drop the JSON on the page, or
+pick it with the file button; it is read in the tab and not uploaded.
+
+- Every channel gets a thumbnail, so it is possible to scan all 52 at once and
+  see which ones moved.
+- Up to eight can be plotted together on the big chart. Drag across it to zoom
+  into a stretch of time, double click to zoom back out, hover to read values
+  off the traces.
+- Stretches where the model found no face are shaded, and the line breaks
+  across them rather than being drawn through a value nobody measured.
+
+It draws lines and nothing else. There is no peak finding, no thresholding and
+no notion of a gesture anywhere in it, deliberately: the point is to look at the
+shape of a real signal before choosing any numbers from it, and a tool that has
+already decided where the interesting parts are is no use for that.
+
+Opening the 9.6 MB ten minute recording takes about 110 ms and costs about
+9 MB of heap.
 
 ## Deploying
 

@@ -20,12 +20,20 @@ export default function Home() {
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
           Nothing is built yet beyond the sensing layer.
         </p>
-        <Link
-          href="/debug"
-          className="w-fit rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500"
-        >
-          Open the blendshape debug page
-        </Link>
+        <div className="flex flex-wrap gap-3">
+          <Link
+            href="/debug"
+            className="w-fit rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500"
+          >
+            Open the blendshape debug page
+          </Link>
+          <Link
+            href="/viewer"
+            className="w-fit rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+          >
+            Open a recording in the viewer
+          </Link>
+        </div>
       </section>
 
       <section className="flex flex-col gap-2 border-t border-zinc-200 pt-6 text-sm text-zinc-600 dark:border-zinc-800 dark:text-zinc-400">
