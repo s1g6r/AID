@@ -3,14 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "sync:wasm": "node scripts/sync-mediapipe-wasm.mjs",
-    "predev": "npm run sync:wasm",
+    "predev": "npm run sync:assets",
     "dev": "next dev --turbopack",
-    "prebuild": "npm run sync:wasm",
+    "prebuild": "npm run sync:assets",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "sync:assets": "node scripts/sync-mediapipe-assets.mjs"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^1.0.1",

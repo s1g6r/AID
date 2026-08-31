@@ -41,7 +41,7 @@ frame. You should see fifty-two blendshape coefficients updating live.
 | `npm run build` | Production build. Syncs the WASM runtime first. |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run lint` | ESLint |
-| `npm run sync:wasm` | Copies the MediaPipe WASM runtime into `public/` by hand |
+| `npm run sync:assets` | Copies the MediaPipe WASM runtime into `public/` by hand |
 
 Camera access needs a secure context. `http://localhost` counts; a bare IP
 address on your LAN does not, so testing on a tablet means an https tunnel.
@@ -58,6 +58,7 @@ lib/
     faceLandmarker.ts   Loads the WASM runtime and the model bundle
     useFaceLandmarker.ts  requestAnimationFrame detection loop
     blendshapes.ts      The 52 names, typed
+    assetPaths.generated.ts  Content-hashed asset paths, generated
   access/
     types.ts            Shared AccessMethod contract
     GestureSwitch.ts    STUB. One blendshape becomes one switch.
@@ -66,7 +67,7 @@ lib/
   scanning/
     ScanEngine.ts       STUB. Linear and row-column scanning.
 scripts/
-  sync-mediapipe-wasm.mjs
+  sync-mediapipe-assets.mjs
 public/
   models/               Face Landmarker bundle, committed
   mediapipe/wasm/       WASM runtime, generated, gitignored
@@ -82,15 +83,24 @@ guessed at.
 
 Two things have to be present for the model to load:
 
-1. `public/models/face_landmarker.task`, the float16 model bundle. Committed to
-   the repo, 3.6 MB, so no build step depends on a download.
-2. `public/mediapipe/wasm/`, the WASM runtime. About 36 MB, so it is gitignored
-   and copied out of `node_modules` by `scripts/sync-mediapipe-wasm.mjs`, which
-   runs automatically before `dev` and `build`.
+1. `public/models/face_landmarker.<hash>.task`, the float16 model bundle.
+   Committed to the repo, 3.6 MB, so no build step depends on a download.
+2. `public/mediapipe/wasm-<hash>/`, the WASM runtime. About 36 MB, so it is
+   gitignored and copied out of `node_modules` by
+   `scripts/sync-mediapipe-assets.mjs`, which runs automatically before `dev`
+   and `build`.
 
 Copying from `node_modules` rather than pinning a CDN URL means the runtime can
 never drift away from the installed `@mediapipe/tasks-vision` version, and the
 whole thing keeps working on an offline clinic or school network.
+
+Both paths carry a hash of their own contents, and both are served with a one
+year `immutable` cache. That combination is only safe because the path changes
+when the bytes change. The sync script enforces it: it names the WASM directory
+after the hash of the runtime, refuses to run if the committed model's filename
+no longer matches its contents, and writes both paths into
+`lib/vision/assetPaths.generated.ts`, which is committed. Upgrading MediaPipe
+produces a lockfile diff and a path diff in the same commit.
 
 ## Deploying
 
