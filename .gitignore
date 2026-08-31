@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# MediaPipe WASM runtime — ~36 MB, copied out of node_modules by
+# `npm run sync:wasm` (runs automatically via predev/prebuild).
+# Regenerate rather than commit.
+/public/mediapipe/
