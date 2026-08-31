@@ -15,6 +15,20 @@ const eslintConfig = defineConfig([
     // Vendored MediaPipe WASM runtime, copied in by scripts/sync-mediapipe-wasm.mjs.
     "public/mediapipe/**",
   ]),
+  {
+    rules: {
+      // Underscore-prefixed args are the convention for the not-yet-implemented
+      // access-method stubs, where the signature is the point.
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+        },
+      ],
+    },
+  },
 ]);
 
 export default eslintConfig;
