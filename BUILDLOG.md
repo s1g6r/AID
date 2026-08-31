@@ -127,3 +127,151 @@ Copy this template for each new entry.
 - Turn one blendshape into a switch. `jawOpen` or `browInnerUp`, threshold,
   dwell, hysteresis, refractory period. This is the single most important
   component in the project.
+
+---
+
+## 2026-08-31
+
+**Worked on:** Verification, deployment and recording plumbing. No access-method
+logic; the four stubs are untouched.
+
+- Deployed to Vercel. Live at https://aid-blond.vercel.app, `/debug` included.
+- MIT license added.
+- Both MediaPipe assets are now content-addressed and served immutable.
+- Session recording on `/debug`: start, stop, discard, label, download as JSON.
+- Provoked the camera error branches, with mixed success. Details below.
+- Ran the whole pipeline in Firefox 153.
+
+**What broke:**
+
+- **The recorder was sampling at half the rate it claimed, and I only found it
+  by measuring.** A plain `now - lastSample < minGap` gate silently halves the
+  rate whenever the camera runs near the target: at 15 fps every frame lands a
+  fraction of a millisecond short of the 66.67 ms gate, gets rejected, and the
+  one after is taken instead. Measured 127 ms median gap, 7.9 Hz, against a
+  nominal 15 Hz. If I had shipped this and then tuned thresholds tomorrow, the
+  data would have looked fine and been half as dense as labelled.
+- **Then the fix had its own bug.** Measuring the gap from the last sample
+  taken rather than from a fixed grid lets early frames drag the schedule
+  forward, so a 20 fps source got taken in full at 20 Hz. Now decimates against
+  an absolute grid with a half-frame-interval tolerance. Measured after: 14.9 Hz
+  from both 15 and 30 fps sources. A ~20 fps source still comes out slightly
+  fast at about 17 Hz, which I am accepting and have documented rather than
+  chasing, since every sample carries its own timestamp.
+- **Headless Chromium cannot tell permission failures apart.** Trying to
+  provoke `denied` for real, getUserMedia rejected with `NotSupportedError`, not
+  `NotAllowedError`. Probed it four ways (fake device or not, permission granted
+  or not) and got `NotSupportedError` every time, even with the permission
+  granted and a device present. Its media stack refuses outright unless
+  `--use-fake-ui-for-media-stream` is passed. So neither `denied` nor
+  `not-found` is reachable in this environment.
+- `vercel git connect` failed: "You need to add a Login Connection to your
+  GitHub account first". Needs a GitHub login method added to the Vercel account
+  in a browser. Deploys are manual until then.
+
+**What I learned:**
+
+- `NotSupportedError` is not in the getUserMedia spec's list of rejections, but
+  Chromium emits it from builds that cannot capture at all. It now maps to the
+  `unsupported` state instead of falling through to the generic message.
+- Firefox 153 is dramatically faster at this than headless Chromium: 58 fps
+  detection and 6 ms inference, against 15 fps and 31 ms. Not a fair comparison
+  (Chromium was on software WebGL and being fed a video file) but worth
+  remembering that the headless numbers are a floor, not an estimate.
+- Playwright's Firefox does not accept `"camera"` as a context permission. Use
+  the `media.navigator.streams.fake` and `media.navigator.permission.disabled`
+  prefs instead. With permission prompts left enabled it just hangs.
+- A recording with no face in it has an empty `blendshapeNames`, because the
+  names are read off the model the first time a face appears rather than
+  hardcoded. Honest, slightly awkward, documented in the README.
+
+**Decisions:**
+
+- **Content-address both assets rather than add cache headers alone.** The WASM
+  runtime goes to `public/mediapipe/wasm-<hash>/` and the model is committed as
+  `face_landmarker.<hash>.task`. Immutable caching is only safe if the path
+  changes when the bytes do, so the sync script enforces it: it refuses to run
+  if the model's filename no longer matches its contents, and writes both paths
+  into `lib/vision/assetPaths.generated.ts`, which is committed. Upgrading
+  MediaPipe now produces a lockfile diff and a path diff in one commit.
+- **Recording values are `null` when no face is detected, not zeros.** Zeros
+  would be a reading of a neutral face, which is a different claim from there
+  being nothing to read.
+- **Values are stored positionally against `blendshapeNames`**, not as 52
+  key/value pairs per sample. A ten minute session is about nine thousand
+  samples; flat keeps that to a few MB and loads into pandas without reshaping.
+- **Added a free-text label** that goes into the filename. Not asked for, but
+  the alternative is a folder of indistinguishable timestamps tomorrow.
+- **Samples never enter React state.** Nine thousand of them would re-render
+  the page every frame and starve the detector being recorded.
+- `RECORD_HZ` in `app/debug/page.tsx` is one constant. If 15 Hz turns out too
+  coarse for dwell tuning, raising it to 60 records every frame the detector
+  produces.
+
+**Verified this session:**
+
+- Live deployment serves the real app publicly, not a login wall, on
+  https://aid-blond.vercel.app. The team-scoped `*-s1g6rs-projects.vercel.app`
+  URLs are behind Vercel SSO and 302; the production alias is not.
+- Full pipeline against the live https URL, headless Chromium fed a portrait
+  through `--use-file-for-fake-video-capture`: 52 uniquely-named blendshapes,
+  recording downloaded, 46 samples at 14.9 Hz, all values in 0..1, no page
+  errors.
+- Deployed assets return `cache-control: public, max-age=31536000, immutable`
+  with `content-type: application/wasm`, and the old unhashed paths 404.
+- Firefox 153: camera ready, model ready on the GPU delegate, 58 fps, recorder
+  produced 46 samples at 14.9 Hz, no page errors.
+- Sample rate at three source frame rates: 15 fps to 14.9 Hz, 30 fps to 14.9 Hz,
+  ~20 fps to 17.5 Hz.
+
+**Camera error branches, exactly how each was reached:**
+
+| Branch | How | Result |
+| --- | --- | --- |
+| `insecure-context` | **REAL.** Served over plain http on the LAN IP, `http://192.168.4.28:3111/debug` | Correct state, `SecurityError`, right message and hint |
+| `in-use` | **FAULT-INJECTED.** `getUserMedia` overridden to reject with `NotReadableError` | Correct state and copy. Proves the mapping, not the browser |
+| `unsupported` | **FAULT-INJECTED.** `navigator.mediaDevices` removed via an init script | Correct state and copy. Also now reached for real by `NotSupportedError` |
+| `denied` | **NOT REACHED.** Headless Chromium returns `NotSupportedError` for everything | UNVERIFIED |
+| `not-found` | **NOT REACHED.** Same reason | UNVERIFIED |
+
+**Unverified:**
+
+- **UNVERIFIED, needs human test: a real webcam.** Still the big one. Everything
+  so far has been a video file or synthetic color bars. Open
+  https://aid-blond.vercel.app/debug on the laptop and on a phone.
+- **UNVERIFIED, needs human test: `denied`.** Open `/debug`, click Start camera,
+  click Block in the browser prompt. Expect "The browser is blocking camera
+  access for this page." To reset afterwards, use the camera icon in the address
+  bar. On macOS also check System Settings, Privacy and Security, Camera.
+- **UNVERIFIED, needs human test: `not-found`.** Easiest on a desktop with only
+  an external webcam: unplug it, then load `/debug` and click Start camera.
+  Expect "No camera was found that matches what this page asked for."
+- **UNVERIFIED, needs human test: `in-use`.** Open Photo Booth or a Zoom test
+  call first, then `/debug`. Expect "A camera exists but another program is
+  already using it." Fair warning: macOS can share a camera between
+  applications, so this may simply work instead of failing, in which case try it
+  on Windows or skip it.
+- **UNVERIFIED: Safari.** Not tested at all. Safari is the one most likely to
+  behave differently on getUserMedia and on autoplay, and it is what an iPhone
+  will use. Test it before showing this to anyone.
+- **UNVERIFIED: whether 15 Hz is dense enough** to tune a 300 ms dwell against.
+  Four or five samples inside a dwell may turn out too coarse.
+- **UNVERIFIED: recording sessions longer than about three seconds.** Every
+  recording tested was a three second smoke test. A ten minute session at 15 Hz
+  is roughly nine thousand samples and has never been run, so memory growth and
+  the download size are untested.
+
+**Open questions, still deliberately not decided:**
+
+- No marker or event track in a recording, so knowing which segment is which
+  means one gesture per file. If that gets tedious, a "mark" button is the
+  obvious addition, but it edges toward interpreting the data so it is yours to
+  design.
+- `lib/access/types.ts` is still a first sketch. Nothing depends on it.
+- Push-to-deploy still needs the GitHub login connection on the Vercel account.
+
+**Next:**
+
+- Record yourself doing candidate gestures and look at the traces before
+  choosing any numbers.
+- Then `GestureSwitch`: threshold, dwell, hysteresis, refractory period.
