@@ -275,3 +275,212 @@ logic; the four stubs are untouched.
 - Record yourself doing candidate gestures and look at the traces before
   choosing any numbers.
 - Then `GestureSwitch`: threshold, dwell, hysteresis, refractory period.
+
+---
+
+## 2026-08-31 (evening)
+
+**Worked on:** Verification and one tool. No access-method logic; the four
+stubs are still untouched.
+
+- Ten minute soak of the recorder, with real heap measurements rather than
+  reassurance.
+- `/viewer`: opens an exported recording and plots it. Drawing only.
+
+**The soak, and the actual numbers:**
+
+Ten minutes, headless Chromium, production build served by `next start`, fed a
+30 second 640x480 30 fps looping y4m of a face with a slow pan so the values
+move rather than repeat a single frame. Heap read through CDP
+`HeapProfiler.collectGarbage` followed by `Runtime.getHeapUsage`, so every
+figure is what survived a forced full GC, not what happened to be uncollected.
+
+Rate, per minute, computed from the sample timestamps in the exported file and
+not from wall clock:
+
+| minute | samples | Hz |
+| --- | --- | --- |
+| 0 | 901 | 15.00 |
+| 1 | 899 | 15.01 |
+| 2 | 899 | 14.98 |
+| 3 | 900 | 15.00 |
+| 4 | 901 | 15.01 |
+| 5 | 899 | 14.99 |
+| 6 | 900 | 15.00 |
+| 7 | 900 | 15.00 |
+| 8 | 900 | 15.00 |
+| 9 | 900 | 15.00 |
+
+Overall 9,028 samples across 601,869 ms, 14.998 Hz. No drift, no decay, no
+dropped stretch. Gaps between samples: min 31 ms, median 67 ms, p99 96 ms, max
+131 ms, and zero gaps over 200 ms in ten minutes. Timestamps strictly
+increasing throughout. Detection ran at 26 to 31 fps the whole time (mean 29.2)
+with inference at 26.9 to 42.5 ms (mean 32.2), so the detector never became the
+bottleneck the recorder was decimating from.
+
+Heap, after a forced GC each time:
+
+| when | heap used | heap total | DOM nodes | listeners | samples held |
+| --- | --- | --- | --- | --- | --- |
+| before recording | 6.81 MB | 7.83 MB | 756 | 358 | n/a |
+| 0 min | 7.04 MB | 7.83 MB | 779 | 357 | 0 |
+| 2 min | 8.76 MB | 9.94 MB | 779 | 361 | 1,805 |
+| 5 min | 10.31 MB | 11.89 MB | 779 | 357 | 4,512 |
+| 10 min | 13.90 MB | 15.53 MB | 779 | 353 | 9,021 |
+| after stop | 14.01 MB | 15.53 MB | 776 | 358 | 9,028 |
+| after download | 13.97 MB | 15.53 MB | 782 | 363 | 9,028 |
+
+Growth is 6.86 MB over ten minutes, about 797 bytes per sample, and linear:
+999, 760 and 797 bytes per sample measured over the first two, five and ten
+minutes. DOM node count was 779 at two, five and ten minutes, identical to
+three significant figures, so the 15 Hz re-render of 52 rows for ten minutes
+leaks no nodes. Listener count wandered between 353 and 363 with no trend. Zero
+page errors for the whole run; the only console output was three MediaPipe
+startup lines and four WebGL driver performance warnings.
+
+The exported file: 10,082,258 bytes, 9.62 MB. Parses. `sampleCount` 9,028
+matches `samples.length` 9,028. All 9,028 samples carry all 52 values, every
+value in 0..1, no NaN, no nulls, last timestamp 601,869 ms, and the last bytes
+of the file close the JSON. Nothing truncated, nothing degraded. 415 ms from
+clicking Download to the browser receiving the file.
+
+**The growing array, since it was asked about directly:**
+
+Yes, it is one array that grows for the length of the session, each entry
+holding a fresh 52-element array. At ten minutes that is 6.86 MB of retained
+heap, measured, and it is not a problem. Extrapolating the linear growth, thirty
+minutes is roughly 21 MB retained and a 29 MB file. Also not a problem for
+memory.
+
+What actually scales badly is the export, not the recording. Measured separately
+by building a structure of the same shape and size in a bare page and taking a
+GC'd reading while holding each stage alive:
+
+| held | heap |
+| --- | --- |
+| the samples array alone | 4.06 MB |
+| plus the JSON string | 13.02 MB |
+
+So `JSON.stringify` roughly triples peak heap for the moment it runs, because
+the whole session has to exist twice at once. The synthetic string came out at
+9,397,829 characters against the real file's 10,082,258 bytes, close enough to
+use: on the app's own measured 13.90 MB that puts the export peak around 23 MB
+for a ten minute recording and, extrapolated, around 55 MB for a thirty minute
+one. Still fine on a laptop, worth knowing before anyone tries an hour.
+`JSON.stringify` itself took 11 ms.
+
+One thing worth watching: `Runtime.getHeapUsage` drops from 13.02 MB back to
+4.07 MB the instant `new Blob([json])` is constructed, while the string is still
+referenced and still readable (`length` 9,397,829, `charCodeAt` works). The
+bytes did not go away, they left the V8 heap for blob storage. So heap readings
+taken after the Blob exists understate what the process is holding.
+
+**What broke:** nothing in the app. The two things that broke were mine:
+
+- The first fake video source cropped the head off. A centre crop of a portrait
+  is a crop of a necktie, and the soak ran a clean full minute at exactly 15 Hz
+  with `faceDetected: false` on all 901 samples. The rate numbers were real, the
+  test was worthless. Framed the crop on the face and re-ran. Worth remembering
+  as a way this rig lies: every metric can look right while nothing is being
+  measured.
+- The recorder's `estimatedBytes` is wrong by 2.8x. It assumes 404 bytes per
+  sample (52 x 7 + 40); the real file is 1,116.8 bytes per sample. The UI said
+  "approx size 3560 KB" for a file that turned out to be 9.62 MB. It is a
+  display estimate and no data is affected, so it is written up rather than
+  quietly patched.
+
+**The viewer:**
+
+`/viewer`, client-only, reads the file in the tab and uploads nothing.
+
+- All 52 channels as thumbnails, so which channels moved is one glance rather
+  than 52 clicks. Sortable by range in the file or by model order.
+- Up to eight plotted together on a big chart, drag to zoom, double click to
+  reset, hover for a crosshair and a value readout per series.
+- Stretches with no face are shaded and the line breaks across them. Drawing a
+  line through a null would draw a value nobody measured.
+- Canvas, not SVG: 9,000 points times 52 channels is not something to hand a
+  DOM.
+
+**Decisions:**
+
+- **The viewer draws and nothing else.** No peak finding, no thresholds, no
+  gesture anything, on purpose. It is for looking at a signal before choosing
+  numbers from it, and a tool that has already decided where the interesting
+  parts are is no use for that.
+- **Sort by range is in, and it is a judgement call.** It puts the channels that
+  travelled furthest at the top, which is the difference between a usable tool
+  and 52 checkboxes. It is descriptive, it is labelled in the UI as a sort order
+  and nothing more, and model order is one click away. If it feels like the tool
+  pointing at an answer, delete it, the code is four lines.
+- **Colour belongs to a channel, not to a position.** Selections are held in
+  eight fixed colour slots, so unpicking one series never repaints the others.
+- **Eight series maximum**, because that is how many colours are distinguishable
+  and a ninth would have to be a repeat.
+- **Series colours were validated, not chosen by eye**, for colour-vision
+  separation and contrast against this project's own light and dark surfaces.
+  Three of the light steps fall below 3:1 on white, which is why every series
+  also carries its name in the legend and, at four or fewer, at the end of its
+  own line. Colour is never the only thing telling two lines apart.
+- **The y axis defaults to 0..1**, the range the model actually reports, with
+  fit-to-range as an option. A chart that autoscales by default makes a channel
+  that never left 0.02 look like a gesture.
+
+**Verified this session:**
+
+- Ten minute recording holds 14.98 to 15.01 Hz in every one of ten one-minute
+  windows, with the numbers above.
+- Heap growth over ten minutes is 6.86 MB, linear, and DOM node count is flat.
+  No page errors.
+- The 9.62 MB export is well formed, complete and not truncated.
+- The viewer opens that same 9.62 MB file in 114 ms for 9.3 MB of heap, renders
+  52 thumbnails and the detail chart with non-blank pixels, plots four channels,
+  zooms by drag to a 64 second window, reads values off the trace under the
+  cursor, and resets. Zero page errors.
+- Viewer failure paths, each with a real file: a truncated/invalid JSON, a valid
+  JSON with the wrong `format`, and a real recording that contains no face at
+  all (all values null, no channel names). Each gives its own message instead of
+  a blank page or a stack trace.
+- Face-gap rendering, against a recording doctored to contain three no-face
+  runs: shaded bands appear and the line breaks across them.
+- Dark mode rendered and looked at, not assumed.
+- `npm run lint`, `npx tsc --noEmit` and `npm run build` all clean.
+
+**Unverified:**
+
+- **UNVERIFIED: everything about a real webcam, still.** Every number in this
+  entry came from a video file played into Chrome's fake capture device. The
+  soak proves the recorder holds its rate against a source that never stutters,
+  never changes exposure and never loses the face. A real camera in a real room
+  does all three. Re-run something like this once there is a real recording.
+- **UNVERIFIED: 30 minutes.** The 21 MB and 55 MB figures above are linear
+  extrapolation from four measured points, not measurements. Linear is the right
+  model for an array that grows by a fixed amount per sample, but nobody has run
+  it.
+- **UNVERIFIED: the export peak as one observed reading.** 23 MB is the app's
+  measured 13.90 MB plus the separately measured 8.96 MB the JSON string costs.
+  The transient itself was never captured in a single reading: `JSON.stringify`
+  blocks the main thread, so nothing on that thread can observe the peak while
+  it exists.
+- **UNVERIFIED: the viewer on a phone.** Only ever opened at 1400px wide. The
+  layout is responsive but drag-to-zoom on a touch screen has not been tried.
+- **UNVERIFIED: the viewer in Firefox or Safari.** Chromium only.
+- Everything still open from this morning: `denied` and `not-found` still need a
+  human, Safari is still untested, and whether 15 Hz is dense enough to tune a
+  300 ms dwell against is still an open question, though the traces in the
+  viewer should now answer it by eye.
+
+**Open questions, still deliberately not decided:**
+
+- `estimatedBytes` is 2.8x low. Easy to fix by measuring one serialised sample
+  and multiplying, but it is a cosmetic number and the fix is a decision about
+  how much cost to put on the hot path.
+- Still no marker or event track in a recording, so it is still one gesture per
+  file. The viewer makes this more noticeable, not less: the obvious next thing
+  when looking at a ten minute trace is wanting to label a stretch of it.
+- `lib/access/types.ts` is still a first sketch. Nothing depends on it.
+
+**Next:**
+
+- Record real gestures on a real face and look at them in the viewer.
+- Then `GestureSwitch`, with numbers read off those traces.
