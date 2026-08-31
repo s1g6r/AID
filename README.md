@@ -121,4 +121,5 @@ drive a sixty-cell symbol board, and this project will not claim it can.
 
 ## License
 
-Not chosen yet. `@mediapipe/tasks-vision` is Apache-2.0.
+MIT, see [LICENSE](LICENSE). `@mediapipe/tasks-vision` and the Face Landmarker
+model bundle are Apache-2.0, from Google.
