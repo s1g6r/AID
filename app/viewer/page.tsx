@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   loadRecording,
   RecordingParseError,
@@ -53,16 +53,10 @@ export default function ViewerPage() {
         t0: parsed.times[0],
         t1: parsed.times[parsed.times.length - 1],
       });
-      // Start with the widest-ranging channel plotted, purely so the chart is
-      // not empty on open. It is a starting point, not a suggestion.
-      const widest = [...parsed.channels]
-        .filter((channel) => channel.max !== null)
-        .sort(
-          (a, b) => (b.max! - b.min!) - (a.max! - a.min!),
-        )[0];
-      const next: (number | null)[] = new Array(MAX_SERIES).fill(null);
-      if (widest) next[0] = widest.index;
-      setSlots(next);
+      // Nothing is plotted on open. Picking a channel to start with, even the
+      // widest-ranging one, would be the page nominating a channel as the
+      // interesting one, which is exactly the judgement it must not make.
+      setSlots(new Array(MAX_SERIES).fill(null));
     } catch (cause) {
       setLoaded(null);
       setFileName(file.name);
@@ -107,6 +101,28 @@ export default function ViewerPage() {
       return next;
     });
   }, []);
+
+  // Both sort orders are one click, and also one keystroke. There are exactly
+  // two of them and neither is cleverer than the other: one is the model's own
+  // order, one is how far each value travelled in this file.
+  useEffect(() => {
+    if (!loaded) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      const isTextEntry =
+        target instanceof HTMLTextAreaElement ||
+        target?.isContentEditable === true ||
+        (target instanceof HTMLInputElement &&
+          !["checkbox", "radio", "file", "button"].includes(target.type));
+      if (isTextEntry) return;
+      if (event.key !== "s" && event.key !== "S") return;
+      event.preventDefault();
+      setSortMode((mode) => (mode === "range" ? "model" : "range"));
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [loaded]);
 
   const rows = useMemo(() => {
     if (!loaded) return [];
@@ -341,6 +357,12 @@ export default function ViewerPage() {
                 >
                   Model order
                 </Toggle>
+                <span className="self-center text-zinc-500 dark:text-zinc-400">
+                  or press{" "}
+                  <kbd className="rounded border border-zinc-300 px-1 font-mono dark:border-zinc-700">
+                    s
+                  </kbd>
+                </span>
                 <button
                   type="button"
                   onClick={() => setSlots(new Array(MAX_SERIES).fill(null))}
