@@ -10,6 +10,11 @@ import {
   isKnownBlendshape,
   type BlendshapeScore,
 } from "@/lib/vision/blendshapes";
+import {
+  downloadRecording,
+  useBlendshapeRecorder,
+  type RecorderStats,
+} from "@/lib/recording/useBlendshapeRecorder";
 
 /**
  * Hello world for the sensing layer: live camera plus every blendshape the
@@ -20,6 +25,13 @@ import {
  * trying to read, and nobody can read a number that changes that fast anyway.
  */
 const RENDER_HZ = 15;
+
+/**
+ * Recording rate. The detector runs faster than this, at camera rate, so
+ * samples are decimated. Fifteen samples a second gives four or five readings
+ * inside a 300 ms dwell, which is enough to see the shape of a gesture.
+ */
+const RECORD_HZ = 15;
 
 type SortMode = "score" | "model";
 
@@ -39,6 +51,24 @@ export default function DebugPage() {
   const [sortMode, setSortMode] = useState<SortMode>("score");
   const [observedNames, setObservedNames] = useState<string[] | null>(null);
 
+  const {
+    isRecording,
+    hasRecording,
+    start: startRecording,
+    stop: stopRecording,
+    discard: discardRecording,
+    capture: captureSample,
+    getStats,
+    build: buildRecording,
+  } = useBlendshapeRecorder({ sampleRateHz: RECORD_HZ });
+  const [label, setLabel] = useState("");
+  const [recorderStats, setRecorderStats] = useState<RecorderStats | null>(null);
+  const [savedAs, setSavedAs] = useState<string | null>(null);
+  const captureRef = useRef(captureSample);
+  useEffect(() => {
+    captureRef.current = captureSample;
+  }, [captureSample]);
+
   const handleResult = useCallback(
     (result: FaceLandmarkerResult, frameStats: FrameStats) => {
       const categories = result.faceBlendshapes[0]?.categories ?? [];
@@ -50,6 +80,14 @@ export default function DebugPage() {
         })),
         stats: frameStats,
       };
+      // Recording is gated on elapsed time inside the recorder, and is a no-op
+      // when not recording, so this stays cheap on the hot path.
+      captureRef.current(
+        categories.map((category) => category.categoryName),
+        categories.map((category) => category.score),
+        frameStats.faceDetected,
+        frameStats.timestampMs,
+      );
     },
     [],
   );
@@ -59,6 +97,25 @@ export default function DebugPage() {
     enabled: cameraReady,
     onResult: handleResult,
   });
+  const landmarkerDelegate = landmarker.delegate;
+  const cameraSettings = camera.settings;
+  const modelReady = landmarker.status === "ready";
+
+  const handleDownload = useCallback(() => {
+    const recording = buildRecording(label.trim(), {
+      userAgent: navigator.userAgent,
+      capture: cameraSettings
+        ? {
+            width: cameraSettings.width,
+            height: cameraSettings.height,
+            frameRate: cameraSettings.frameRate,
+          }
+        : null,
+      delegate: landmarkerDelegate,
+    });
+    if (!recording) return;
+    setSavedAs(downloadRecording(recording));
+  }, [buildRecording, label, cameraSettings, landmarkerDelegate]);
 
   // Pull the latest frame into React on a fixed cadence.
   useEffect(() => {
@@ -71,9 +128,10 @@ export default function DebugPage() {
       if (latest.scores.length > 0) {
         setObservedNames(latest.scores.map((entry) => entry.name));
       }
+      setRecorderStats(getStats());
     }, 1000 / RENDER_HZ);
     return () => window.clearInterval(id);
-  }, [cameraReady]);
+  }, [cameraReady, getStats]);
 
   const rows = useMemo(() => {
     if (sortMode === "model") return scores;
@@ -198,6 +256,104 @@ export default function DebugPage() {
             />
             <Stat label="blendshapes" value={String(scores.length)} />
           </dl>
+
+          <section className="flex flex-col gap-3 rounded-md border border-zinc-200 p-4 dark:border-zinc-800">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-medium">Record a session</h2>
+              {isRecording && (
+                <span className="flex items-center gap-2 text-xs font-medium text-red-600 dark:text-red-400">
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-red-600 dark:bg-red-400" />
+                  recording
+                </span>
+              )}
+            </div>
+
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              Captures all {EXPECTED_BLENDSHAPE_COUNT} coefficients at{" "}
+              {RECORD_HZ} Hz to a JSON file. The file is built in this tab and
+              saved straight to your downloads folder. Nothing is uploaded.
+            </p>
+
+            <label className="flex flex-col gap-1 text-xs">
+              <span className="text-zinc-500 dark:text-zinc-400">
+                What is this recording? Goes in the filename.
+              </span>
+              <input
+                type="text"
+                value={label}
+                onChange={(event) => setLabel(event.target.value)}
+                placeholder="jawOpen x10 slow"
+                disabled={isRecording}
+                className="rounded-md border border-zinc-300 px-3 py-2 font-mono text-xs disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900"
+              />
+            </label>
+
+            <div className="flex flex-wrap gap-2">
+              {!isRecording ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSavedAs(null);
+                    startRecording();
+                  }}
+                  disabled={!modelReady}
+                  className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-zinc-400 dark:disabled:bg-zinc-700"
+                >
+                  Start recording
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={stopRecording}
+                  className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900"
+                >
+                  Stop recording
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleDownload}
+                disabled={!hasRecording || isRecording}
+                className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-900"
+              >
+                Download JSON
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSavedAs(null);
+                  discardRecording();
+                }}
+                disabled={!hasRecording && !isRecording}
+                className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-900"
+              >
+                Discard
+              </button>
+            </div>
+
+            {(isRecording || hasRecording) && recorderStats && (
+              <dl className="grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-xs">
+                <Stat
+                  label="samples"
+                  value={String(recorderStats.sampleCount)}
+                />
+                <Stat
+                  label="duration"
+                  value={`${(recorderStats.durationMs / 1000).toFixed(1)} s`}
+                />
+                <Stat
+                  label="approx size"
+                  value={`${(recorderStats.estimatedBytes / 1024).toFixed(0)} KB`}
+                />
+              </dl>
+            )}
+
+            {savedAs && (
+              <p className="font-mono text-xs text-green-700 dark:text-green-400">
+                saved {savedAs}
+              </p>
+            )}
+          </section>
         </div>
 
         <div className="flex min-w-0 flex-col gap-4">
