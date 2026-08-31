@@ -32,6 +32,12 @@ export interface CameraError {
 }
 
 export interface UseCameraOptions {
+  /**
+   * The <video> element to attach the stream to. The caller owns it, because
+   * the detection loop needs the same element and React's compiler rules do
+   * not want a ref handed back out of a hook alongside render state.
+   */
+  videoRef: React.RefObject<HTMLVideoElement | null>;
   /** Requested capture size. The browser may return something else. */
   width?: number;
   height?: number;
@@ -46,8 +52,6 @@ export interface UseCameraOptions {
  */
 
 export interface UseCameraResult {
-  /** Attach to a <video> element. The hook sets and clears srcObject. */
-  videoRef: React.RefObject<HTMLVideoElement | null>;
   status: CameraStatus;
   error: CameraError | null;
   /** Live track settings once running, for the debug readout. */
@@ -111,14 +115,14 @@ function describe(err: unknown): CameraError {
   }
 }
 
-export function useCamera(options: UseCameraOptions = {}): UseCameraResult {
+export function useCamera(options: UseCameraOptions): UseCameraResult {
   const {
+    videoRef,
     width = DEFAULTS.width,
     height = DEFAULTS.height,
     frameRate = DEFAULTS.frameRate,
   } = options;
 
-  const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   // Guards against a second start() landing while the first is still awaiting
   // the permission prompt, which would leave an orphaned stream running.
@@ -134,7 +138,7 @@ export function useCamera(options: UseCameraOptions = {}): UseCameraResult {
     if (videoRef.current) videoRef.current.srcObject = null;
     setSettings(null);
     setStatus("idle");
-  }, []);
+  }, [videoRef]);
 
   const start = useCallback(async () => {
     if (pendingRef.current || streamRef.current) return;
@@ -195,7 +199,7 @@ export function useCamera(options: UseCameraOptions = {}): UseCameraResult {
     } finally {
       pendingRef.current = false;
     }
-  }, [width, height, frameRate]);
+  }, [videoRef, width, height, frameRate]);
 
   // Release the camera if the component unmounts while a stream is live.
   useEffect(() => {
@@ -206,5 +210,5 @@ export function useCamera(options: UseCameraOptions = {}): UseCameraResult {
     };
   }, []);
 
-  return { videoRef, status, error, settings, start, stop };
+  return { status, error, settings, start, stop };
 }
