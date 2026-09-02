@@ -1,9 +1,12 @@
 # Test harness
 
 Scripts that are run by hand when something needs proving, not on every commit.
-Each one drives a real headless browser and prints JSON, because the questions
-they answer ("does the sample rate hold for ten minutes", "does that canvas
-actually have anything drawn on it") cannot be answered by a build passing.
+Most drive a real headless browser and print JSON, because the questions they
+answer ("does the sample rate hold for ten minutes", "does that canvas actually
+have anything drawn on it") cannot be answered by a build passing.
+
+`replay-switch.mjs` is the exception: it needs no browser and no build, because
+the question it answers is about a recording that already exists.
 
 ## Setup
 
@@ -24,6 +27,9 @@ Everything below assumes a production build being served, not `next dev`:
 ```sh
 npm run build && npx next start -p 3111
 ```
+
+`replay-switch.mjs` needs neither. It does need Node 23.6 or newer, which runs
+the app's TypeScript directly; it was written against 26.5.
 
 ## The fake camera
 
@@ -100,3 +106,45 @@ One thing it showed that is worth remembering: heap readings taken after the
 Blob exists understate what the process holds, because constructing a Blob moves
 the string's bytes out of the V8 heap while the string is still referenced and
 still readable.
+
+### `replay-switch.mjs`: what a switch does to a recording you already have
+
+```sh
+node test-harness/replay-switch.mjs /path/to/recording.json
+node test-harness/replay-switch.mjs recording.json --blendshape jawOpen \
+  --on 0.4 --off 0.25 --dwell 250 --refractory 500 --json /tmp/fires.json
+```
+
+Runs the real `GestureSwitch` from `lib/access/` over every sample in a
+recording and prints each press and release with its timestamp and the value
+that triggered it, then the totals. No browser, no camera, no build. Reruns in
+milliseconds, so a threshold can be changed and re-checked immediately.
+
+Frames are built by `frameFromRecordingSample` in `lib/access/frame.ts`, the
+same function the live path uses, so the switch cannot tell a replayed frame
+from a real one. That is the entire point: a number that looks right here is a
+number about the real class, not about a copy of it.
+
+Before the fire log it prints what the file itself contains: measured sample
+rate, median and worst frame spacing, how many frames the configured dwell
+actually spans at that spacing, the range the chosen channel covered, and
+whether that range ever reaches `onThreshold` at all. A dwell of 250ms is under
+four frames at 15 Hz, and that is easier to reason about when it is on screen
+next to the result.
+
+`--switch path/to/variant.ts` runs a different implementation instead of the
+committed one, for comparing two state machines against the same trace.
+
+The defaults are the provisional numbers from the build log entry of
+2026-09-01. They came off one 28 second clip and are not validated. In
+particular, **this script cannot tell a deliberate gesture from ordinary
+talking**, and neither can the switch: a run showing clean presses on a gesture
+recording says nothing about false positives until the same configuration has
+been run over a recording of normal speech and chewing and shown to fire zero
+times. That recording does not exist yet.
+
+### `ts-hooks.mjs`
+
+Not a test. It teaches Node to resolve the `@/...` alias and extensionless
+imports the app is written with, so a harness script can import `lib/` source
+directly instead of the app being rewritten to suit a test script.

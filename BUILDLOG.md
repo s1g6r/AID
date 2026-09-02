@@ -521,3 +521,114 @@ The four stubs are still untouched, and still throw.
 
 - Record real gestures on a real face and look at them in the viewer.
 - Then `GestureSwitch`, with numbers read off those traces.
+
+---
+
+## 2026-09-01 — First GestureSwitch numbers
+
+Analyzed the iPhone recording from 08-31 (aid-recording-2026-08-31T20-42-37_2.json).
+
+jawOpen: rest ~0.001, peak 0.85 — clean separation, near-zero baseline.
+browInnerUp: rest ~0.05-0.09 drifting to ~0.33 by end of clip — noisier
+baseline, possibly face position drift over the 28s clip. Not using this
+one for v0.
+
+Picking jawOpen as the first switch channel.
+
+Provisional numbers from this single clip (NOT validated against
+false positives yet):
+- onThreshold: 0.4
+- offThreshold: 0.25 (hysteresis gap)
+- dwellMs: 250
+- refractoryMs: 500
+
+Still needed before trusting this: multiple takes of the same gesture,
+and a negative-control recording of normal talking/chewing to check
+jawOpen doesn't cross 0.4 during ordinary speech.
+---
+
+## 2026-09-01 — GestureSwitch runs, and something to run it with
+
+`GestureSwitch` is implemented. Three supporting things had to change first,
+and one of them is worth more than the switch itself.
+
+**`AccessFrame` no longer carries a raw `FaceLandmarkerResult`.**
+
+It carries blendshape scores already keyed by name, plus `timestampMs` and
+`faceDetected`. Two reasons. A switch reading one channel should not walk a
+52-entry category array every frame at 15 Hz, which is a cost `soak-test.mjs`
+exists to catch. And a frame in this shape can be built out of a recorded
+sample as easily as out of a live result, which is what makes replay possible
+at all. `lib/access/frame.ts` builds both, so the live path and the replay path
+cannot drift apart.
+
+The raw result is still there as an optional field, because `HeadPointer` and
+`GazePointer` need the transformation matrix and landmark geometry and a
+blendshape recording does not contain either. Those two cannot be replayed
+against recordings until the recorder stores geometry. Worth knowing before
+planning to tune them the same way.
+
+**`test-harness/replay-switch.mjs` runs the real switch over a recording.**
+
+No browser, no camera, no build, reruns in milliseconds. It prints every press
+and release with its timestamp and triggering value, the totals, and, before
+any of that, what the file itself contains: measured rate, frame spacing, how
+many frames the configured dwell actually spans, and the range the channel
+covered. `ts-hooks.mjs` teaches Node to resolve the `@/` alias so a script can
+import `lib/` source directly rather than the app being bent to suit a test.
+
+**Decisions inside the switch, both of which are behaviour and not mechanics.**
+
+*Refractory starts at release, not at press.* This is a hold-style switch:
+press fires once when dwell completes, the switch stays held as long as the
+gesture is held, release fires when it is let go, and the dead time starts
+there. Starting it at press would let one long hold re-fire partway through
+itself.
+
+*A blendshape missing from a frame is read as zero.* In this machine that is
+identical to "below offThreshold", so a lost face drops an engaged switch
+rather than holding it on. The cost is real and should not be filed away: a
+tracking flicker mid-hold produces a release nobody performed, and then a
+refractory window that blocks the next genuine press. Failing toward "off" is
+the safer direction for a switch, but this is the first thing to revisit if
+someone reports the switch letting go on its own.
+
+Two smaller ones. The frame that ends a refractory window is judged rather
+than spent, because returning early there would silently add 67ms to every
+refractory period at 15 Hz. And the constructor and `configure` throw on a
+config that cannot behave, in particular `offThreshold` above `onThreshold`,
+because inverted hysteresis does not fail visibly, it produces a switch that
+chatters, and a switch that chatters in front of someone who cannot correct it
+by hand is worse than one that refuses to start.
+
+**What it does to the 08-31 clip.**
+
+    3 press, 3 release over 428 frames, 0.2µs per frame
+
+The cost is nothing; `soak-test.mjs` will not notice this. The count needs more
+care. That clip contains **four** jawOpen excursions above 0.4, not three:
+
+    onset     held above off   frames  peak     result
+    7072ms       800ms          13    0.8481    press
+    8672ms       533ms           9    0.7851    press
+   11668ms       334ms           6    0.4896    press
+   27338ms       197ms           4    0.4066    swallowed, 53ms short of dwell
+
+The fourth was a real jaw opening and the switch discarded it. Sweeping dwell
+puts the cliff between 150ms and 200ms: at 150 it fires four times, at 200 it
+fires three. So 250ms is not a comfortable middle, it is a setting that already
+rejects one gesture in four from the only person who has ever used this. At 15
+Hz a 250ms dwell is 3.7 frames, and the difference between accepting and
+rejecting a gesture is one sample.
+
+That does not mean lower it. A shorter dwell is exactly what makes a switch
+fire on ordinary movement, and there is still no recording of ordinary
+movement to check that against. It means the number is doing more work than a
+single clip can justify, and both directions need evidence rather than one.
+
+**Still the open blocker, unchanged and now more pointed:**
+
+No negative control exists. Nothing here says anything about false positives.
+A recording of normal talking and chewing, run through this same harness with
+this same config, needs to fire zero times before any of these numbers get
+trusted. That recording is the next thing, ahead of tuning anything.

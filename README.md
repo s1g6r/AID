@@ -75,7 +75,8 @@ lib/
     loadRecording.ts    Reads a file back. Descriptive only.
   access/
     types.ts            Shared AccessMethod contract
-    GestureSwitch.ts    STUB. One blendshape becomes one switch.
+    frame.ts            Builds AccessFrames from a live result or a recording
+    GestureSwitch.ts    One blendshape becomes one switch.
     HeadPointer.ts      STUB. Cursor from head orientation.
     GazePointer.ts      STUB. Cursor from gaze, with visible error bars.
   scanning/
@@ -86,16 +87,24 @@ test-harness/         Run by hand, not on every commit. See its README.
   soak-test.mjs       Long recording session, with heap measurements
   verify-viewer.mjs   Does /viewer actually draw the file
   serialize-probe.mjs What the export costs at the moment it runs
+  replay-switch.mjs   Runs a switch over a recording, prints what it fired
+  ts-hooks.mjs        Lets those scripts import the app's TypeScript
 public/
   models/               Face Landmarker bundle, committed
   mediapipe/wasm/       WASM runtime, generated, gitignored
 ```
 
-The four files marked STUB contain types and signatures only. Every method
-throws. That is deliberate: threshold, dwell, hysteresis, refractory period and
-scan rate are the settings that decide whether any of this is usable by a
-particular person, and they get written against a real person rather than
+The three files still marked STUB contain types and signatures only. Every
+method throws. That is deliberate: threshold, dwell, hysteresis, refractory
+period and scan rate are the settings that decide whether any of this is usable
+by a particular person, and they get written against a real person rather than
 guessed at.
+
+`GestureSwitch` is the first one written. Its numbers came off one 28 second
+recording of one face and have not been checked against a recording of ordinary
+talking, so they are a starting point for tuning and not a result. Run it over
+a recording with `test-harness/replay-switch.mjs` and read the build log entry
+of 2026-09-01 before trusting any of them.
 
 ## MediaPipe assets
 
