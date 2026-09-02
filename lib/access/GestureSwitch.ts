@@ -8,9 +8,14 @@ import type { AccessFrame, AccessMethod, SwitchEvent } from "./types";
  * hysteresis, refractory period) and the numbers now in use came off a single
  * 28 second recording. The hysteresis and refractory behaviour is the part
  * that decides whether this is usable by someone with dystonia or athetosis,
- * and one clip of one face is not that. No recording of ordinary talking exists
- * yet, so nothing here has been checked against false positives. Treat the
- * defaults as a starting point for tuning against a real person, not a result.
+ * and one clip of one face is not that.
+ *
+ * The defaults below are NOT a working configuration. A 63.5 second recording
+ * of ordinary talking, replayed through this switch on 2026-09-02, produced
+ * ten presses at values from 0.54 to 0.86, which overlaps the range of
+ * deliberate gestures. jawOpen does not separate speech from an intentional
+ * jaw opening at any threshold, so the channel is the problem and not the
+ * numbers. See the build log entry for 2026-09-02.
  *
  * Two behaviours are decisions rather than mechanics, and both are in the
  * build log entry of 2026-09-01 (evening):

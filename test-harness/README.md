@@ -139,12 +139,14 @@ next to the result.
 committed one, for comparing two state machines against the same trace.
 
 The defaults are the provisional numbers from the build log entry of
-2026-09-01. They came off one 28 second clip and are not validated. In
-particular, **this script cannot tell a deliberate gesture from ordinary
-talking**, and neither can the switch: a run showing clean presses on a gesture
-recording says nothing about false positives until the same configuration has
-been run over a recording of normal speech and chewing and shown to fire zero
-times. That recording does not exist yet.
+2026-09-01, and **they are known to be wrong**. This script cannot tell a
+deliberate gesture from ordinary talking, and neither can the switch. That
+negative control has now been run: 63.5 seconds of normal speech fired ten
+presses on jawOpen at the default config, at values overlapping real gestures.
+
+So the defaults are useful for exercising the harness and useless as a
+configuration. Any new channel gets the same treatment before it is trusted:
+run it over the talking recording first, and expect zero presses.
 
 ### `ts-hooks.mjs`
 

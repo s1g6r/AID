@@ -548,7 +548,7 @@ jawOpen doesn't cross 0.4 during ordinary speech.
 
 ---
 
-## 2026-09-01 (evening) — GestureSwitch, and a way to run it without a face
+## 2026-09-01 (evening) - GestureSwitch, and a way to run it without a face
 
 **Worked on:** The first access method. `GestureSwitch` is implemented,
 `AccessFrame` was reshaped to suit it, and there is now a harness that runs a
@@ -557,14 +557,14 @@ time.
 
 **What changed:**
 
-- `lib/access/GestureSwitch.ts` — implemented. No longer throws.
-- `lib/access/types.ts` — `AccessFrame` carries blendshape values keyed by
+- `lib/access/GestureSwitch.ts`: implemented. No longer throws.
+- `lib/access/types.ts`: `AccessFrame` carries blendshape values keyed by
   name, plus `timestampMs` and `faceDetected`, instead of a raw
   `FaceLandmarkerResult`.
-- `lib/access/frame.ts` — new. Builds an `AccessFrame` from either a live
+- `lib/access/frame.ts`: new. Builds an `AccessFrame` from either a live
   model result or a recorded sample.
-- `test-harness/replay-switch.mjs` — new. Runs the switch over a recording.
-- `test-harness/ts-hooks.mjs` — new. Lets a plain node script import the app's
+- `test-harness/replay-switch.mjs`: new. Runs the switch over a recording.
+- `test-harness/ts-hooks.mjs`: new. Lets a plain node script import the app's
   TypeScript, so the harness reads `lib/` source instead of a copy.
 
 **Running it:**
@@ -696,3 +696,58 @@ sample. Worth knowing before any dwell number is treated as precise.
    `onThreshold`, a longer dwell knowing it already costs gestures, or a
    different channel.
 3. Wire the switch into the detection loop and re-run the soak.
+
+---
+
+## 2026-09-02 - Negative control fails: jawOpen unusable for speech
+
+Recorded 63.5s of normal talking, ran through replay-switch.mjs with
+committed config (on 0.4 / off 0.25 / dwell 250 / refractory 500).
+
+Result: 10 press events, confirmed against the actual test-harness
+output (not just a manual check). Press values ranged 0.5398 to
+0.8574, overlapping the 0.85 peak from the original gesture clip.
+No threshold separates "intentional jaw-open gesture" from "talking"
+using this blendshape alone. The distributions overlap.
+
+Conclusion: jawOpen is not usable as a switch channel while speech is
+present. This is a channel choice problem, not a dwell/threshold
+tuning problem.
+
+Next: test a blendshape with no expected speech correlation, starting
+with a voluntary long blink (eyeBlinkLeft/eyeBlinkRight held), since
+people don't typically hold both eyes shut for 300ms+ mid-sentence.
+Will reuse this same talking recording as the negative control rather
+than re-recording it.
+
+**Update, same day: blink evaluated against the existing recording, and dropped.**
+
+eyeBlinkLeft and eyeBlinkRight replayed over the same 63.5s talking
+recording with the committed config (on 0.4 / off 0.25 / dwell 250 /
+refractory 500):
+
+    eyeBlinkLeft     4 press
+    eyeBlinkRight    7 press
+
+Requiring both eyes together, min(left, right) at on 0.5 / off 0.3, gives
+11 excursions in that clip:
+
+    dwell 250ms -> 4 fire
+    dwell 300ms -> 3 fire
+    dwell 400ms -> 1 fire
+    dwell 500ms -> 1 fire
+    longest both-eye closures: 533ms, 333ms, 325ms, 267ms, 208ms
+
+So the premise above, that people do not hold both eyes shut for 300ms+
+mid-sentence, does not hold. It happened three times over 300ms and once
+for 533ms in a single minute of talking. Zero fires would need a dwell
+longer than 533ms, and that is the worst case from one minute.
+
+Note: eyeBlinkLeft/eyeBlinkRight were evaluated only against the
+existing talking negative-control recording. No deliberate blink
+gesture clip was recorded, since the eyes-closed-during-scanning
+problem disqualifies this channel on its own regardless of
+false-positive rate. Numbers above are false-positive counts, not
+a true/false positive comparison.
+
+No replacement channel chosen yet.
