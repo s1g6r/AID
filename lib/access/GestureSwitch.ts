@@ -8,11 +8,12 @@ import type { AccessFrame, AccessMethod, SwitchEvent } from "./types";
  * hysteresis, refractory period) and the numbers now in use came off a single
  * 28 second recording. The hysteresis and refractory behaviour is the part
  * that decides whether this is usable by someone with dystonia or athetosis,
- * and one clip of one face is not that. Treat the defaults as a starting point
- * for tuning against a real person, not as a result.
+ * and one clip of one face is not that. No recording of ordinary talking exists
+ * yet, so nothing here has been checked against false positives. Treat the
+ * defaults as a starting point for tuning against a real person, not a result.
  *
  * Two behaviours are decisions rather than mechanics, and both are in the
- * build log entry of 2026-09-01:
+ * build log entry of 2026-09-01 (evening):
  *
  * 1. Refractory starts at release, not at press. This is a hold-style switch:
  *    press fires once when dwell completes, the switch stays held for as long

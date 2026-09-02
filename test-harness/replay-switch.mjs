@@ -2,11 +2,16 @@
  * Runs a real `GestureSwitch` over a recorded trace and prints what it fired.
  *
  * The point is that the switch under test is the one in `lib/access/`, not a
- * copy of it: the same class the app would use, fed frames built by the same
- * `frameFromRecordingSample` the live path uses, so a result here means
+ * copy of it: the same class the app would use, so a result here means
  * something about the real thing. Nothing in this file decides anything about
  * a gesture. It reports the events the switch produced and the numbers the
  * file already contained.
+ *
+ * Frames are built by `frameFromRecordingSample`, the sibling of the
+ * `frameFromResult` a live detection loop would call. They produce the same
+ * shape, but note that nothing calls the live one yet, so "the switch cannot
+ * tell a replayed frame from a live one" is a claim about the types and not
+ * yet an observation.
  *
  * The question it exists to answer is the one the build log has open: does
  * this configuration fire when a jaw opens deliberately, and does it stay

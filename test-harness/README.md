@@ -121,9 +121,12 @@ that triggered it, then the totals. No browser, no camera, no build. Reruns in
 milliseconds, so a threshold can be changed and re-checked immediately.
 
 Frames are built by `frameFromRecordingSample` in `lib/access/frame.ts`, the
-same function the live path uses, so the switch cannot tell a replayed frame
-from a real one. That is the entire point: a number that looks right here is a
-number about the real class, not about a copy of it.
+sibling of the `frameFromResult` a live detection loop would call. Both produce
+the same `AccessFrame`, so a number here is a number about the real class and
+not about a copy of it. Worth being precise about the limit though: nothing
+calls the live builder yet, so "a replayed frame is indistinguishable from a
+live one" is currently a claim about the types rather than something that has
+been observed.
 
 Before the fire log it prints what the file itself contains: measured sample
 rate, median and worst frame spacing, how many frames the configured dwell
