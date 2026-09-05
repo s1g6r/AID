@@ -90,6 +90,44 @@ canvas and the thumbnails contain non-transparent pixels, that drag-to-zoom
 narrows the window, that hovering reads values off the traces, and that reset
 restores. Prints heap cost and load time. Fails loudly on any page error.
 
+### `scan-trace.mjs`: does the scanning state machine do what it says
+
+```sh
+node test-harness/scan-trace.mjs
+```
+
+No browser and no clock. `ScanEngine` has no timer of its own, so this hands it
+timestamps and reads the events back: step timing, descending into a row,
+selecting a cell, the post-selection pause swallowing a double press, escaping
+back to row level when a row runs out of passes, exhaustion, waking an
+exhausted board, both dwell-latency compensation settings, linear mode, and
+that a stalled loop fires one catch-up step rather than nine.
+
+Every case is a behaviour a person would feel. Run it after any change to
+`ScanEngine.ts`; it takes under a second.
+
+### `verify-board.mjs`: does the whole loop work end to end
+
+```sh
+node test-harness/verify-board.mjs                                   # no camera
+node test-harness/verify-board.mjs http://localhost:3111/board out.png fake
+node test-harness/verify-board.mjs http://localhost:3111/board out.png face.y4m
+```
+
+Drives `/board` in a real browser: auto-scan advances, a press descends a row,
+a second press selects a cell and the right word reaches speech synthesis, a
+third press inside the post-selection pause is swallowed, the board resumes at
+the top, and the reaction-budget readout tracks the compensation toggle.
+`speechSynthesis.speak` is wrapped in an init script rather than listened for,
+because headless Chromium has no voices and would silently speak nothing.
+
+The fourth argument is optional. `fake` uses Chromium's generated colour bars:
+no face in them, so it checks only that the camera and model come up and that a
+frame with no face reaches the switch without throwing. A `.y4m` path with a
+face in it goes further. Neither can perform a mouthPucker, so **no automated
+check here proves that a real gesture produces a press** on this page. That leg
+needs a face, and the switch meter on the page exists to make it obvious.
+
 ### `serialize-probe.mjs`: what the export costs at the moment it runs
 
 ```sh

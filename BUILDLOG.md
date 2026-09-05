@@ -858,3 +858,116 @@ setup. Not yet validated across a second person or environment.
 Still needed before broader trust: multiple recording sessions/days,
 and eventually a different person's face entirely — findable via SLP
 outreach.
+
+---
+
+## 2026-09-04 (evening) — First end-to-end path: camera to switch to scan to speech
+
+**Worked on:** `ScanEngine` implemented, a six-cell board at `/board`, and the
+whole chain wired up. `GestureSwitch.ts` untouched.
+
+**What is verified, and how:**
+
+- `test-harness/scan-trace.mjs`, 23 checks, all passing. No browser and no fake
+  timers: the engine has no clock of its own, so the test hands it timestamps
+  and reads its events back.
+- `test-harness/verify-board.mjs` in headless Chromium: auto-scan advances at
+  the configured interval, a press descends into the highlighted row, a second
+  press selects the cell, `speechSynthesis.speak` is called with the right
+  word, a third press inside the post-selection pause is swallowed, and the
+  board resumes at the top. Zero page errors.
+- Camera and model both reach `ready` on `/board` and the detection loop runs.
+
+**UNVERIFIED, and it is the leg that matters:** that a real mouthPucker on a
+real face produces a press on this page. A fake camera cannot pucker. The
+switch meter on the page shows the live channel value, the threshold line and
+dwell progress, so a gesture that is not registering should be visible rather
+than mysterious. This is the first thing to check by hand.
+
+Worse than that: the y4m face source and every recording from the last two
+sessions were in a temp directory that has since been cleared, and the portrait
+they were built from is gone with them. So the camera leg was checked with
+Chromium's generated colour bars, which have no face in them and prove only
+that a no-face frame reaches the switch without throwing. Committing a small
+face fixture to the repo would fix this permanently, but a photograph of a real
+person in a public repo is a licensing and privacy decision, not a build one.
+
+**The timing decision, which is the important one:**
+
+A press arrives `dwellMs` AFTER the gesture begins, because dwell is what
+separates a gesture from a twitch. With the committed switch (dwell 700 ms) and
+a 1000 ms scan interval, that leaves **300 ms** between the highlight landing on
+a cell and the gesture having to start, or the press lands on the next cell.
+300 ms is around the floor of ordinary simple reaction time and well under it
+for most of the people this is for.
+
+This was not designed in, it fell out of two numbers chosen separately, and it
+is the kind of thing that would have been discovered as "the board keeps picking
+the wrong word" rather than as arithmetic. Two ways out, both left open:
+
+1. Raise `scanIntervalMs`. The budget grows one for one. Slider on the page.
+2. `pressLatencyCompensationMs`: attribute a press to whatever was highlighted
+   when the gesture STARTED. This is how switch hardware normally handles
+   activation latency. Off by default, toggle on the page, and the engine keeps
+   a short history of recent highlights to make it possible.
+
+The page prints the budget live and warns under 400 ms. Both settings need a
+real face before either becomes a default.
+
+**Decisions, all of them tunable and none of them tested on a person:**
+
+- **`scanIntervalMs` 1000** as asked. See above; it is tight.
+- **`postSelectionPauseMs` 1000.** After a word is spoken the board freezes,
+  ignores presses, then resumes **at the top of the board** rather than where it
+  left off. Reasoning: the next word is a fresh choice, not a continuation. This
+  is also the accidental-double-press answer, and it composes with the switch's
+  own refractory rather than duplicating it: the switch cannot fire again until
+  release plus 500 ms plus another 700 ms of dwell, so the two windows overlap
+  and a lingering gesture cannot select anything.
+- **Running out of passes inside a row escapes back to row level**, rather than
+  giving up. Picking the wrong row is an ordinary mistake and it should cost a
+  few seconds, not the session. Running out at *row* level stops the board,
+  because flashing a grid at someone who has stopped answering is not neutral.
+- **A press on an exhausted board restarts it.** Otherwise the only way back is
+  a mouse, which is the one thing the person using this does not have.
+- **`maxLoops` 3, `firstStepExtraMs` 0.** Both guesses. The second exists
+  because the first step of a pass is where a slow responder most often misses,
+  and it is currently doing nothing.
+- **Six cells, two rows of three.** Worth knowing: on a 2x3 grid linear
+  scanning averages 3.5 steps and row-column averages 3. Row-column barely pays
+  for its second press at this size. It pays properly at 9.
+- **Emoji, not symbols.** Placeholders. Real AAC uses a licensed symbol set and
+  symbol choice is a clinical decision.
+- **Speech cancels whatever is still speaking.** A new selection means the
+  person has moved on. Cost: two fast selections only speak the second.
+- **Rate and pitch left at platform defaults**, not guessed at.
+
+**Added to the engine's interface, beyond the stub:**
+
+- `tick(nowMs)`. The engine owns no timer, for the same reason `GestureSwitch`
+  is driven by frames: a machine that reads the clock itself cannot be replayed.
+- `pressLatencyCompensationMs` in the config, per the timing note above.
+
+**What broke:**
+
+- **The space-bar switch stand-in was pressing "Stop scanning" instead.** Space
+  activates a focused button by default, and the button had just been clicked to
+  start scanning, so every test press stopped the board. The headless run caught
+  it immediately: the highlight went to `-` and the status to `idle` one press
+  in. Now armed only while scanning, and it calls `preventDefault`. Buttons stay
+  reachable with Enter.
+- **Passed `{ current: videoElement }` as the video ref**, rebuilt on every
+  render. `useFaceLandmarker` has that ref in its effect deps, so the model would
+  have been torn down and reloaded on every state change, at 15 Hz, forever.
+  Caught by reading it rather than by running it, which is luck; a real webcam
+  would have made it obvious and the fake one might not have.
+- Two of the 23 scan-trace assertions failed on the first run and **both were
+  wrong tests, not wrong code**: one stopped ticking 500 ms before the press it
+  was testing, so the engine had never been given the chance to advance.
+
+**Next:**
+
+- Try it on a face. Watch the meter, not the board, when it does not work.
+- The reaction budget is the first thing to feel: 1000 ms scan interval with a
+  700 ms dwell may simply not be operable, in which case raise the interval or
+  turn compensation on and see which feels better.

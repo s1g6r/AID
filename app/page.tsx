@@ -18,12 +18,19 @@ export default function Home() {
           Scaffolding
         </h2>
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          Nothing is built yet beyond the sensing layer.
+          One switch, one gesture, six words. The first end-to-end path
+          works; everything around it is still scaffolding.
         </p>
         <div className="flex flex-wrap gap-3">
           <Link
-            href="/debug"
+            href="/board"
             className="w-fit rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500"
+          >
+            Open the scanning board
+          </Link>
+          <Link
+            href="/debug"
+            className="w-fit rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
           >
             Open the blendshape debug page
           </Link>

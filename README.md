@@ -56,6 +56,10 @@ address on your LAN does not, so testing on a tablet means an https tunnel.
 app/
   page.tsx              Landing page
   debug/page.tsx        Live camera and all 52 blendshapes
+  board/
+    page.tsx            Camera to switch to scan to board to speech
+    cells.ts            The six words and their placeholder icons
+    speech.ts           Web Speech API, and what to say when it is missing
   viewer/
     page.tsx            Plots a saved recording. Drawing only.
     DetailChart.tsx     The big chart: axes, crosshair, drag to zoom
@@ -80,7 +84,7 @@ lib/
     HeadPointer.ts      STUB. Cursor from head orientation.
     GazePointer.ts      STUB. Cursor from gaze, with visible error bars.
   scanning/
-    ScanEngine.ts       STUB. Linear and row-column scanning.
+    ScanEngine.ts       Linear and row-column scanning. No timer of its own.
 scripts/
   sync-mediapipe-assets.mjs
 test-harness/         Run by hand, not on every commit. See its README.
@@ -94,11 +98,12 @@ public/
   mediapipe/wasm/       WASM runtime, generated, gitignored
 ```
 
-The three files still marked STUB contain types and signatures only. Every
+The two files still marked STUB contain types and signatures only. Every
 method throws. That is deliberate: threshold, dwell, hysteresis, refractory
 period and scan rate are the settings that decide whether any of this is usable
 by a particular person, and they get written against a real person rather than
-guessed at.
+guessed at. `GestureSwitch` and `ScanEngine` are now real for exactly that
+reason: both were written against recordings of a face, not against a guess.
 
 `GestureSwitch` is the first one written. Its numbers came off one 28 second
 recording of one face and have not been checked against a recording of ordinary
@@ -181,6 +186,27 @@ df = pd.DataFrame(
 )
 df.index.name = "t_ms"
 ```
+
+## The scanning board
+
+`/board` is the first end-to-end path: camera, one facial gesture, row-column
+scanning, six words, spoken aloud. Everything runs in the tab.
+
+The switch is the configuration selected on 2026-09-04 after nine channels were
+ruled out against real recordings: `mouthPucker`, on 0.6, off 0.4, dwell 700 ms,
+refractory 500 ms. See the build log for why each of the other eight was
+dropped.
+
+Two numbers interact and it is not obvious: **a press arrives `dwellMs` after
+the gesture begins**, because dwell is what separates a gesture from a twitch.
+At the starting scan interval of 1000 ms that leaves 300 ms to react before the
+highlight moves on. The page shows this budget live, and there is a toggle that
+makes a press select whatever was highlighted when the gesture *started* rather
+than when it completed, which is how switch-scanning hardware usually deals with
+activation latency. It is off by default because it changes what a press means.
+
+While scanning, the space bar stands in for the switch, so the board, the
+timing and the speech can be tested without performing the gesture.
 
 ## Viewing a recording
 
