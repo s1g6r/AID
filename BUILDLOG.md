@@ -751,3 +751,110 @@ false-positive rate. Numbers above are false-positive counts, not
 a true/false positive comparison.
 
 No replacement channel chosen yet.
+
+---
+
+## 2026-09-04 — Stress test: browDownLeft/Right, noseSneerLeft, eyeSquintLeft
+
+Ran a 114.9s stress-test recording (talking + exaggerated expressions +
+laugh/yawn + chewing + face-touching) against four upper-face candidates,
+chosen to avoid the mouth-region contamination found in the jawOpen test
+and the eyes-closed-during-scanning problem that disqualified blink.
+
+Results at committed config (on 0.4 / off 0.25 / dwell 250 / refractory 500):
+- browDownLeft:    2 false presses
+- browDownRight:   1 false press
+- noseSneerLeft:   0 false presses — never exceeded 0.0001 across the
+  entire clip. Strongest result of any channel tested so far.
+- eyeSquintLeft:   17 false presses — squinting is frequent and largely
+  involuntary (light, concentration, laughing), ruled out.
+
+noseSneerLeft is the leading candidate. Still needed before trusting it:
+a deliberate gesture clip to confirm it's actually producible on demand
+and reaches a usable peak value, and a judgment call on whether the
+muscle group is a reasonable ask for the target population.
+
+---
+
+## 2026-09-04 (cont.) — noseSneerLeft ruled out: not producible
+
+Attempted deliberate nose-sneer gestures. Could not reliably produce
+the movement on demand — inconsistent, hard to control voluntarily.
+
+This matters independent of the stress-test result. A channel that
+never fires during ordinary movement is only useful if it can also be
+triggered reliably on purpose. noseSneerLeft passed the negative
+control but fails the positive control, so it's ruled out.
+
+Back to browDownLeft/Right as the leading candidates — both were quiet
+in the stress test (2 and 1 false presses respectively over 114.9s) and
+"furrowing your brow" is a far easier voluntary motion for most people
+than an isolated nose sneer.
+
+---
+
+## 2026-09-04 (cont.) — browDownLeft/Right ruled out: not sustainable
+
+Segmented analysis of brow-attempt-1 showed rest and attempt values
+overlapping at low effort (worst-case rest 0.285 vs weakest attempt
+0.271) — no clean separation without effort ramping up over the
+session (later attempts reached 0.40-0.50).
+
+Stopped here rather than re-recording at higher effort: sustained
+furrowing is physically uncomfortable to hold. A switch gesture that
+causes strain is disqualified regardless of signal quality — this
+would be unusable for repeated real-world use, and likely worse for
+someone with limited muscle control, not better.
+
+Five candidates now ruled out: jawOpen (overlaps ordinary talking/
+surprise), eyeBlinkLeft/Right (blocks vision during scanning; also
+noisy), noseSneerLeft (quiet but not voluntarily producible),
+browDownLeft/Right (physically uncomfortable to sustain).
+
+---
+
+## 2026-09-04 — Channel selection: mouthPucker
+
+Nine candidates tested against real recordings this session: jawOpen,
+eyeBlinkLeft/Right, noseSneerLeft, browDownLeft/Right, cheekPuff,
+jawForward, jawRight, jawLeft, mouthFunnel, mouthPucker. Each ruled
+out for a specific documented reason except the last.
+
+- jawOpen: overlaps ordinary talking and surprise (10 false presses/63.5s)
+- eyeBlinkLeft/Right: disqualified structurally (blocks vision needed
+  for scanning UI), also noisy (11+ false crossings)
+- noseSneerLeft: quiet at rest (0 false positives) but not voluntarily
+  producible on demand
+- browDownLeft/Right: no clean rest/gesture separation at low effort,
+  and sustained furrowing is physically uncomfortable — disqualified
+  regardless of signal quality
+- cheekPuff, jawForward, jawRight: model does not reliably sense these
+  from a 2D front-facing camera (values near 0.000 even during
+  deliberate attempts) — a sensing limitation, not a technique issue
+- jawLeft: same sensing limitation, confirmed on a second, more
+  deliberate attempt (max 0.087 even during gesture)
+- mouthFunnel: some separation but thin (gap +0.062), not pursued
+  further once mouthPucker showed a much stronger result
+
+mouthPucker: clean separation in the positive-control recording
+(worst rest 0.451, weakest attempt 0.928). At dwell 250ms, 3-4 speech
+events still crossed threshold at full strength (spoken rounded
+vowels briefly produce a full pucker shape). Raising dwell to 600ms
+eliminated all false positives in a 63.5s pure-talking negative
+control. In a separate, more adversarial 114.9s stress-test recording
+(talking + exaggerated expressions + laugh/yawn + chewing +
+face-touching), 2 false positives remained even at dwell 800ms,
+source not identified — possibly an exaggerated expression made
+during that section. Not chasing dwell further; the responsiveness
+cost outweighs eliminating one unexplained edge case in an
+intentionally adversarial test that doesn't represent real usage.
+
+Final config: onThreshold 0.6, offThreshold 0.4, dwellMs 700,
+refractoryMs 500.
+
+Caveats: single user, single set of sessions, single lighting/camera
+setup. Not yet validated across a second person or environment.
+
+Still needed before broader trust: multiple recording sessions/days,
+and eventually a different person's face entirely — findable via SLP
+outreach.
