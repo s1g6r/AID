@@ -17,6 +17,7 @@ export type CameraStatus =
   | "denied"
   | "not-found"
   | "in-use"
+  | "timeout"
   | "insecure-context"
   | "unsupported"
   | "error";
@@ -42,6 +43,16 @@ export interface UseCameraOptions {
   width?: number;
   height?: number;
   frameRate?: number;
+  /**
+   * How long to wait for getUserMedia before giving up on it.
+   *
+   * A hung request is not hypothetical: on a loaded machine, or with a camera
+   * the OS has not released, getUserMedia can sit forever without resolving or
+   * rejecting. Without this the page stays in `requesting`, the start button
+   * stays disabled, and clicking it does nothing with nothing on screen to say
+   * why. Reported as "the camera is stuck off" on 2026-09-04.
+   */
+  timeoutMs?: number;
 }
 
 /*
@@ -60,7 +71,10 @@ export interface UseCameraResult {
   stop: () => void;
 }
 
-const DEFAULTS = { width: 640, height: 480, frameRate: 30 } as const;
+const DEFAULTS = { width: 640, height: 480, frameRate: 30, timeoutMs: 10_000 } as const;
+
+/** Thrown by the timeout leg of the race, so the catch can tell them apart. */
+const TIMED_OUT = Symbol("camera-request-timed-out");
 
 function describe(err: unknown): CameraError {
   const name = err instanceof DOMException ? err.name : "";
@@ -132,18 +146,30 @@ export function useCamera(options: UseCameraOptions): UseCameraResult {
     width = DEFAULTS.width,
     height = DEFAULTS.height,
     frameRate = DEFAULTS.frameRate,
+    timeoutMs = DEFAULTS.timeoutMs,
   } = options;
 
   const streamRef = useRef<MediaStream | null>(null);
   // Guards against a second start() landing while the first is still awaiting
   // the permission prompt, which would leave an orphaned stream running.
   const pendingRef = useRef(false);
+  /**
+   * Bumped by stop(), by unmount, and by every new start(). A request whose
+   * number is no longer current has been abandoned, and any stream it produces
+   * is stopped rather than attached. This is what makes the timeout safe:
+   * getUserMedia cannot be cancelled, so a late grant has to be caught here.
+   */
+  const attemptRef = useRef(0);
 
   const [status, setStatus] = useState<CameraStatus>("idle");
   const [error, setError] = useState<CameraError | null>(null);
   const [settings, setSettings] = useState<MediaTrackSettings | null>(null);
 
   const stop = useCallback(() => {
+    // Abandon anything still in flight, so a stream that arrives after this
+    // cannot attach itself to a camera the user has just switched off.
+    attemptRef.current += 1;
+    pendingRef.current = false;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
@@ -171,23 +197,34 @@ export function useCamera(options: UseCameraOptions): UseCameraResult {
       return;
     }
 
+    const attempt = attemptRef.current + 1;
+    attemptRef.current = attempt;
     pendingRef.current = true;
     setError(null);
     setStatus("requesting");
 
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: {
-          facingMode: "user",
-          width: { ideal: width },
-          height: { ideal: height },
-          frameRate: { ideal: frameRate },
-        },
-      });
+    const request = navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        facingMode: "user",
+        width: { ideal: width },
+        height: { ideal: height },
+        frameRate: { ideal: frameRate },
+      },
+    });
 
-      // stop() may have run while the permission prompt was open.
-      if (!pendingRef.current) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    try {
+      const stream = await Promise.race([
+        request,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(TIMED_OUT), timeoutMs);
+        }),
+      ]);
+
+      // stop(), unmount, or a newer start() ran while the prompt was open.
+      if (attemptRef.current !== attempt) {
         stream.getTracks().forEach((track) => track.stop());
         return;
       }
@@ -204,17 +241,41 @@ export function useCamera(options: UseCameraOptions): UseCameraResult {
 
       setStatus("ready");
     } catch (err) {
+      if (attemptRef.current !== attempt) return;
+
+      if (err === TIMED_OUT) {
+        // getUserMedia has no cancel. The request keeps running, so the only
+        // thing to do is let it finish on its own and release whatever it
+        // eventually produces. Without this a late grant leaves the camera
+        // light on with nothing on screen accounting for it.
+        void request.then(
+          (late) => late.getTracks().forEach((track) => track.stop()),
+          () => undefined,
+        );
+        setError({
+          status: "timeout",
+          message: `The camera did not respond within ${Math.round(timeoutMs / 1000)} seconds.`,
+          hint: "This usually means the machine is busy or another program is still holding the camera. Wait a moment and try again. If a permission prompt is open, answer it first.",
+        });
+        setStatus("timeout");
+        return;
+      }
+
       const described = describe(err);
       setError(described);
       setStatus(described.status);
     } finally {
-      pendingRef.current = false;
+      clearTimeout(timer);
+      // Only if this attempt is still the current one: a newer start() owns
+      // the flag by now and clearing it here would let a third request in.
+      if (attemptRef.current === attempt) pendingRef.current = false;
     }
-  }, [videoRef, width, height, frameRate]);
+  }, [videoRef, width, height, frameRate, timeoutMs]);
 
   // Release the camera if the component unmounts while a stream is live.
   useEffect(() => {
     return () => {
+      attemptRef.current += 1;
       pendingRef.current = false;
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;

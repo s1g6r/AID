@@ -4,6 +4,9 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FaceLandmarkerResult } from "@mediapipe/tasks-vision";
 import { useCamera } from "@/lib/camera/useCamera";
+import { CameraOverlay, startButtonLabel } from "@/lib/camera/CameraOverlay";
+import { LoopDiagnostics, type LoopSnapshot } from "@/lib/diagnostics/LoopDiagnostics";
+import { LoopDiagnosticsPanel } from "@/lib/diagnostics/LoopDiagnosticsPanel";
 import { useFaceLandmarker, type FrameStats } from "@/lib/vision/useFaceLandmarker";
 import { frameFromResult } from "@/lib/access/frame";
 import { GestureSwitch, type GestureSwitchConfig, type GestureSwitchState } from "@/lib/access/GestureSwitch";
@@ -50,6 +53,14 @@ const INITIAL_SCAN_CONFIG: ScanEngineConfig = {
 /** Switch readout refresh. The detector runs faster; nobody can read faster. */
 const READOUT_HZ = 15;
 
+/**
+ * A frame-to-frame gap at or above this counts as a stall.
+ *
+ * 100 ms is three missed frames at 30 fps capture, which is around where a
+ * freeze stops being invisible and starts being the thing someone reports.
+ */
+const STALL_MS = 100;
+
 export default function BoardPage() {
   // A real ref, not an object rebuilt each render: `useFaceLandmarker` has it
   // in its effect deps, so a new identity every render would tear down and
@@ -65,6 +76,7 @@ export default function BoardPage() {
   const speechState = useSpeechAvailability();
 
   const [switchState, setSwitchState] = useState<GestureSwitchState | null>(null);
+  const [loopSnapshot, setLoopSnapshot] = useState<LoopSnapshot | null>(null);
   const [engineStatus, setEngineStatus] = useState<string>("idle");
   const [pressCount, setPressCount] = useState(0);
   const [scanning, setScanning] = useState(false);
@@ -75,6 +87,8 @@ export default function BoardPage() {
   // Created once. Both machines are plain classes with no React inside them,
   // which is what lets the same code be replayed by the test harness.
   const [gestureSwitch] = useState(() => new GestureSwitch(SWITCH_CONFIG));
+  // Measures the loop; changes nothing about it.
+  const [diagnostics] = useState(() => new LoopDiagnostics({ stallMs: STALL_MS }));
   const [engine] = useState(
     () =>
       new ScanEngine(INITIAL_SCAN_CONFIG, {
@@ -93,6 +107,12 @@ export default function BoardPage() {
 
   const handleResult = useCallback(
     (result: FaceLandmarkerResult, stats: FrameStats) => {
+      diagnostics.record({
+        timestampMs: stats.timestampMs,
+        inferenceMs: stats.inferenceMs,
+        rafTicks: stats.rafTicks,
+        videoTimeDeltaMs: stats.videoTimeDeltaMs,
+      });
       const frame = frameFromResult(result, stats.timestampMs);
       const event = gestureSwitch.update(frame);
       if (event?.type === "press") {
@@ -100,7 +120,7 @@ export default function BoardPage() {
         engine.onSwitchPress(event.timestampMs);
       }
     },
-    [gestureSwitch, engine],
+    [gestureSwitch, engine, diagnostics],
   );
 
   const landmarker = useFaceLandmarker({
@@ -129,9 +149,27 @@ export default function BoardPage() {
     const id = window.setInterval(() => {
       setSwitchState(gestureSwitch.getState());
       setEngineStatus(engine.status);
+      setLoopSnapshot(diagnostics.snapshot(performance.now()));
     }, 1000 / READOUT_HZ);
     return () => window.clearInterval(id);
-  }, [gestureSwitch, engine]);
+  }, [gestureSwitch, engine, diagnostics]);
+
+  /**
+   * Visibility, recorded rather than acted on.
+   *
+   * requestAnimationFrame does not fire in a hidden tab, so the detection loop
+   * stops on its own and resumes on return. Nothing here restarts or throttles
+   * it. The only reason this listener exists is that the gap spanning a
+   * backgrounded stretch is arbitrarily large and would otherwise be reported
+   * as the worst stall of the session, hiding every real one.
+   */
+  useEffect(() => {
+    const onVisibility = () => {
+      diagnostics.noteVisibility(document.hidden, performance.now());
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [diagnostics]);
 
   useEffect(() => {
     engine.configure({
@@ -237,7 +275,7 @@ export default function BoardPage() {
           disabled={cameraReady || camera.status === "requesting"}
           className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-400 dark:disabled:bg-zinc-700"
         >
-          Start camera
+          {startButtonLabel(camera.status)}
         </button>
         {!scanning ? (
           <button
@@ -283,12 +321,11 @@ export default function BoardPage() {
               muted
               autoPlay
             />
-            {!cameraReady && (
-              <div className="absolute inset-0 grid place-items-center p-4 text-center text-xs text-zinc-400">
-                Camera is off. The board still scans, and the space bar stands
-                in for the switch.
-              </div>
-            )}
+            <CameraOverlay
+              status={camera.status}
+              error={camera.error}
+              idleNote="The board still scans, and the space bar stands in for the switch."
+            />
           </div>
           <SwitchMeter state={switchState} config={SWITCH_CONFIG} />
         </div>
@@ -309,6 +346,8 @@ export default function BoardPage() {
             />
             <Stat label="steps last pick" value={lastSelection ? String(lastSelection.selection.stepsTaken) : "-"} />
           </dl>
+
+          <LoopDiagnosticsPanel snapshot={loopSnapshot} stallMs={STALL_MS} />
 
           <div className="flex flex-col gap-3 rounded-md border border-zinc-200 p-4 dark:border-zinc-800">
             <h2 className="text-sm font-medium">Tuning</h2>

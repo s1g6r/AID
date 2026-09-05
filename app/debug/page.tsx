@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FaceLandmarkerResult } from "@mediapipe/tasks-vision";
 import { useCamera } from "@/lib/camera/useCamera";
+import { CameraOverlay, startButtonLabel } from "@/lib/camera/CameraOverlay";
 import { useFaceLandmarker, type FrameStats } from "@/lib/vision/useFaceLandmarker";
 import {
   BLENDSHAPE_NAMES,
@@ -173,13 +174,7 @@ export default function DebugPage() {
               muted
               autoPlay
             />
-            {!cameraReady && (
-              <div className="absolute inset-0 grid place-items-center p-6 text-center text-sm text-zinc-400">
-                {camera.status === "requesting"
-                  ? "Waiting for camera permission."
-                  : "Camera is off."}
-              </div>
-            )}
+            <CameraOverlay status={camera.status} error={camera.error} />
           </div>
 
           <div className="flex flex-wrap gap-3">
@@ -189,7 +184,7 @@ export default function DebugPage() {
               disabled={cameraReady || camera.status === "requesting"}
               className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-400 dark:disabled:bg-zinc-700"
             >
-              Start camera
+              {startButtonLabel(camera.status)}
             </button>
             <button
               type="button"

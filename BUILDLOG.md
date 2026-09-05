@@ -971,3 +971,305 @@ real face before either becomes a default.
 - The reaction budget is the first thing to feel: 1000 ms scan interval with a
   700 ms dwell may simply not be operable, in which case raise the interval or
   turn compensation on and see which feels better.
+
+---
+
+## 2026-09-04 (night) — A camera that would not restart, and an instrument for the freeze
+
+**Worked on:** A reported camera lockup, the two UI defects that made it
+unreadable, live loop diagnostics on /board, and the board grown to nine cells.
+`GestureSwitch.ts`, `ScanEngine.ts` and every timing number are untouched.
+
+**The report:** on /board the camera "crashed" while a hand covered the mouth,
+and afterwards "Start camera" did nothing and the page said the camera was off.
+A hard refresh did not fix it. It resolved on its own later, and the machine
+had been slow at the time.
+
+**The stated hypothesis was wrong, and the path is worth writing down** because
+it is the one that gets re-suspected. Occluding the face cannot throw here:
+
+- `frame.ts:31-34` returns `{ values: NO_VALUES, faceDetected: false }` when
+  `faceBlendshapes[0].categories` is empty.
+- `GestureSwitch.update` reads `frame.values[blendshape] ?? 0`, so a missing
+  channel is zero, which drops an engaged switch rather than holding it.
+- Even a throwing consumer would not kill the loop: `tick` re-schedules its own
+  `requestAnimationFrame` on its first line, before any work. Only
+  `detectForVideo` throwing cancels it.
+
+So a hand over the mouth is an ordinary handled state on this page, exactly as
+it is in the recorder. No Chrome crash dumps existed either, so the GPU process
+had not died.
+
+**What actually fits the report, including the hard refresh:** a `getUserMedia`
+call that never settles. There was no timeout, so the hook sat in `requesting`
+forever; the start button is disabled in that state; and the video overlay
+printed a flat "Camera is off." for *every* status that was not `ready`. A hung
+request, a denial, and a camera that was genuinely off were indistinguishable on
+screen, which is why neither of us could tell from the report which one it was.
+This is unproven as the cause of that particular incident and now unfalsifiable,
+since it cleared. It is a real defect regardless, and it is the defect that made
+the incident unreadable.
+
+**Fixed:**
+
+1. `useCamera` races `getUserMedia` against `timeoutMs` (default 10 s) and
+   reports a new `timeout` status with a message and a hint. `getUserMedia` has
+   no cancel, so an abandoned request is left to run and whatever stream it
+   eventually yields has its tracks stopped. That needed an attempt counter,
+   which also revives the intent of the dead `!pendingRef.current` guard: `stop()`
+   never cleared that flag, so the stale-stream check could not fire. It was
+   unreachable through either page's UI, because both disable Stop unless ready.
+2. `CameraOverlay`, shared by /board and /debug so they cannot drift apart
+   again, says which state the camera is actually in. The start button reads
+   "Starting…" or "Try again" instead of always "Start camera".
+
+**Then a second report: intermittent freezing on /board**, camera, meter and
+highlight together, followed by an apparent speed-up. Two things narrowed it
+before any data:
+
+- `detectForVideo` is a **synchronous** WASM call on the main thread. A slow
+  inference is not something that happens alongside a page freeze, it *is* the
+  page freeze. "Everything freezes together" is the shape that predicts.
+- The highlight cannot actually burst. `ScanEngine.tick` advances one step per
+  tick and reschedules from now (`ScanEngine.ts:227-230`). A highlight that
+  looks like it bursts is queued rendering catching up, not the engine stepping
+  twice.
+
+**`LoopDiagnostics`**, a plain class in the style of the other two machines, fed
+one call per processed frame from /board, with a panel beside the meter. Fixed
+`Float64Array` ring buffers, no allocation on the hot path, percentiles computed
+only in `snapshot` at the existing 15 Hz. An instrument that adds jank cannot
+measure jank. `FrameStats` gained `sinceLastFrameMs`, `rafTicks` and
+`videoTimeDeltaMs`; `rafTicks` is the one that separates "the loop is alive and
+the camera stopped delivering" from "the whole loop was descheduled".
+
+Visibility is recorded, not acted on. rAF already stops in a hidden tab and
+resumes by itself, and nothing here changes that. The listener exists only
+because the gap spanning a backgrounded stretch is arbitrarily large and would
+otherwise be reported as the worst stall of the session, burying every real one.
+Those gaps are excluded from the percentiles rather than counted.
+
+**One bug in the instrument, found by running it and worth remembering.** A gap
+is measured from the start of one inference to the start of the next, so a frame
+whose model call takes 400 ms shows up as a 400 ms gap recorded against the
+*following* frame. The first version therefore printed the recovering frame's
+inference next to the stall: "worst 8498 ms · inference then 36.9 ms", which
+says the model was fast about a stall the model caused. That is the single wrong
+answer this instrument must not give. `StallRecord` now carries
+`previousInferenceMs` and the panel reads "model busy 8152 ms of it".
+
+**Verified, and how.** Production build, `next start -p 3111`, headless
+Chromium via the harness.
+
+| check | result |
+| --- | --- |
+| `tsc --noEmit` | clean |
+| `eslint app lib` | clean, no findings |
+| `next build` | clean, 5 static routes |
+| `scan-trace.mjs` | 23/23 |
+| `diagnostics-trace.mjs` (new) | 49/49 |
+| `verify-camera-states.mjs` (new) | 29/29 |
+| `verify-board.mjs`, no camera | pass, 0 page errors |
+| `verify-board.mjs fake` | pass, camera and model ready, 0 page errors |
+| `verify-viewer.mjs` | pass, 0 page errors |
+| `soak-test.mjs fake`, 3 min | rate flat, heap flat, 0 page errors |
+
+`verify-camera-states.mjs` stubs `getUserMedia` per scenario, because none of
+these states can be reached with a real camera on demand. It checks: idle,
+requesting and denied all say different things; a request that never settles
+reaches `timeout` with a message and an enabled retry; **the retry then succeeds**,
+which is the recovery that was impossible before; a stream arriving 12 s late
+has its tracks stopped and does not attach itself; and the panel fills in with
+live frames.
+
+**The soak numbers, and their limits.** Three minutes on Chromium's generated
+colour bars, because the y4m face fixture and every real recording were lost
+with a cleared temp directory two sessions ago, and a photograph of a real person
+in a public repo is a licensing and privacy decision rather than a build one.
+
+| minute | Hz |
+| --- | --- |
+| 0 | 10.49 |
+| 1 | 10.69 |
+| 2 | 10.47 |
+| 3 | 10.35 |
+
+Overall 10.548 Hz. Gaps: min 28 ms, p50 93, p99 201, max 343, with 21 gaps over
+200 ms. Heap after forced GC: 6.43 MB at start, 7.16 at 2 min, 7.32 at 3 min,
+7.33 after stop; DOM nodes constant at 323 and listeners constant at 361
+throughout. Timestamps monotonic, counts agree, no NaN, no page errors.
+
+What that does and does not say. It says the rate is **flat**, the heap is flat,
+and nothing leaks with the modified detection loop. It does **not** reproduce
+the 15.00 Hz of 2026-08-31: detection only reached 11 to 16 fps here against 26
+to 31 then, and the recorder decimates from detection so it cannot exceed it.
+That difference is not attributable without the same fixture and the same
+machine conditions, so it is not evidence either way about this change. Note
+also that the soak runs /debug, which does not use `LoopDiagnostics` at all: it
+exercised the `FrameStats` additions, not the instrument. The instrument is
+covered by `diagnostics-trace.mjs` and `verify-camera-states.mjs`.
+
+**The first soak run was contaminated and is discarded.** `verify-viewer` was
+run concurrently with it, and the rate decayed from 8.3 Hz to 1.6 Hz across the
+run in step with that. The heap and DOM figures from it agreed with the clean
+run; the rate figures were an artefact of my own CPU contention. Worth the
+entry: this harness measures a machine, so anything else running on that machine
+is part of the measurement.
+
+**The lead worth chasing next, from the clean soak.** Inference sampled at 10 s
+intervals was mostly 25 to 37 ms, with spikes to 152.2, 126.8, 132.8 and 144.1
+ms. Four spikes of four to five times baseline in eighteen point samples, on an
+idle page with no face in frame. If that pattern is real rather than sampling
+luck it is a strong candidate for the reported freeze, and the panel's
+`inference p95` against `gap p95` on a real session will settle it. Chromium
+also logged "GPU stall due to ReadPixels" during model startup, which is
+MediaPipe reading results back off the GPU and is the obvious suspect.
+
+**Two new fixtures, so this is not blocked again.** `make-fixture-recording.mjs`
+generates a synthetic recording, which is what let `verify-viewer` run at all
+after the real files were lost. It is sine waves and it is labelled as such in
+the file. It is good for the viewer, which is a file reader. It must never be
+used for anything about the access methods: replaying a switch over it would
+measure the generator. `soak-test.mjs` now takes `fake` for the colour-bar
+camera the way `verify-board.mjs` already did.
+
+**The board is nine cells**, three rows of three, adding "I want", "hurt" and
+"done". Nine is where row-column starts to pay for the press it costs: 5 steps
+average against linear's 4 on 3x3, where on the old 2x3 it was 3 against 3.5.
+Consequences not adjusted, because scan timing is being tuned separately against
+a real face: a pass is three row steps rather than two, so worst case time to the
+last cell is one scan interval longer, and `maxLoops` 3 now buys three passes
+over three rows. The new row is appended rather than interleaved, because cell
+order is a frequency decision made with the person using the board.
+
+**Unverified, unchanged from before, and still the leg that matters:** that a
+real mouthPucker on a real face produces a press on this page. Colour bars
+cannot pucker. Nothing in this session moved that.
+
+**Next:**
+
+- Watch `inference p95` against `gap p95` on a real session during a freeze.
+  If the model is the cost, the fix is delegate or capture resolution. If it is
+  not, the panel says so and rules it out.
+- The 15 Hz readout interval on /board is gated on nothing, so the page
+  re-renders 15 times a second with the camera off and nothing scanning. Small,
+  but it means the page never idles. One line to gate.
+- A face fixture, decided deliberately rather than by accident: either a
+  synthetic rendered face, or a photograph with documented permission.
+
+---
+
+## 2026-09-05 - Three GPU log lines triaged, none of them ours
+
+**Worked on:** Nothing in the code. Three `chrome://gpu` log entries captured
+during the 2026-09-04 live `/board` testing window, suspected of being behind
+either the camera lockup or the intermittent freeze. Neither. Writing it down
+because the previous entry already says this is the path that gets re-suspected.
+
+**The lines, and how to read them.** Format is
+`[pid:tid:MMDD/HHMMSS.us:SEVERITY:file(line)]`.
+
+1. `20:21:45` `WARNING:ui/gl/angle_platform_impl.cc:53` shader compile log,
+   `GL_OES_EGL_image_external` not supported, `samplerExternalOES` unsupported
+   type, four more ERROR lines.
+2. `20:36:17` `ERROR:shared_image_manager.cc:254` `ProduceSkia: Trying to
+   Produce a Skia representation from a non-existent mailbox.`
+3. `20:36:58` the same error again.
+
+**The severity trap, which is the reusable part.** Entry 1 reads as six ERROR
+lines. Chrome's own severity token on it is `WARNING`. Everything from
+`Compiler log:` onward is ANGLE's internal compiler output quoted into the
+message string. The severity to trust is the prefix, not the embedded text.
+
+**Why the shader failure cannot be ours**, four ways:
+
+- `GL_OES_EGL_image_external` / `samplerExternalOES` is the Android/EGL path for
+  sampling camera and hardware-decoder output as an external YUV image
+  (SurfaceTexture). macOS Chrome does not expose it, so a shader declaring it
+  fails there deterministically, on every compile, forever. A permanent
+  capability failure cannot produce an intermittent symptom that later cleared
+  on its own.
+- The app ships no WebGL. The only canvas is `app/viewer/TraceCanvas.tsx:47`, a
+  2D context, and it is not on `/board`.
+- It is not MediaPipe's either. Grepped the vendored binary:
+  `vision_wasm_internal.wasm` has 62 `sampler2D` and 82 `texture2D`, and **zero**
+  `samplerExternalOES`, zero `EGL_image_external`.
+- It is logged in the GPU process, not from page-supplied shader code.
+
+The subject matter genuinely is video texturing, which is why it looks
+relevant. The platform is one this is not running on.
+
+**Why the mailbox errors fit neither symptom.** A non-existent mailbox drops a
+frame in the compositor. It cannot end a `MediaStreamTrack`, cannot make
+`getUserMedia` hang, and cannot survive a hard refresh, which the reported
+incident did. And the freeze is a main-thread stall by construction, because
+`detectForVideo` is a synchronous WASM call on the main thread, so a GPU-process
+error cannot cause one. If anything causality runs backwards: an 8 s stall, or
+the teardown around it, leaves the compositor holding a shared image that is
+already gone. Two occurrences 41 s apart is also far too sparse to account for
+lag across a session.
+
+**One thing the logs did establish, for free.** All three lines carry pid 1261,
+tid 12834. Same GPU process, same thread, across 20:21:45 to 20:36:58, so the
+GPU process did not restart in that window. Last night's "no crash dumps, so the
+GPU process had not died" was argued from absence; this is positive evidence for
+it.
+
+**A timing fact worth having:** `/board` was committed at 21:08 (282a9b7), so
+20:21 and 20:36 sit inside the evening session while `/board` was still being
+hand-tested, before the night session's camera work. Whether that is the same
+window as the camera-off incident is recorded nowhere, and I could not pin it.
+If the incident was in the night session these logs predate it entirely.
+
+**What broke:**
+
+- The decisive check I wanted, the delegate readout in real Chrome, did not run.
+  The browser extension is not connected. Not retried.
+- Found while trying: **`/debug` cannot report the delegate without a camera.**
+  `useFaceLandmarker` gets `enabled: cameraReady` (`app/debug/page.tsx:99`) and
+  `setDelegate` only happens inside `load()`, so with the camera off the model
+  never loads and `delegate` stays `null`. That readout is least available
+  exactly when it would be most useful, which is while diagnosing a camera that
+  will not start. Not changed, only noted.
+
+**Decisions:**
+
+- **The shader warning is ruled out permanently. Do not re-suspect it.**
+- **The mailbox errors are noted and not chased.** If they turn out to correlate
+  with observed stalls on a real session they are a symptom to read, not a cause
+  to fix.
+- The instrument from last night stays the way in: `inference p95` against
+  `gap p95` on a real session.
+
+**Unverified:**
+
+- Unchanged and still the leg that matters: that a real mouthPucker on a real
+  face produces a press on this page. Nothing this session moved it.
+- **That the GPU delegate is actually taking in real Chrome on this machine.**
+  Argued from the absence of the `[vision] GPU delegate unavailable` warning
+  (`lib/vision/faceLandmarker.ts:67`), never observed. One glance at the
+  `delegate` stat on `/debug` during the next real session settles it.
+
+**Next:**
+
+- The real-face session. Watch `inference p95` against `gap p95`, not the board.
+- Note the `delegate` stat on `/debug` while the camera is on, once, and it stops
+  being unverified.
+- The four inference spikes from the clean soak, 152.2 / 126.8 / 132.8 / 144.1 ms
+  against a 25 to 37 ms baseline, remain the lead.
+
+---
+
+## 2026-09-05 (cont.) — GPU delegate confirmed via capability probe
+
+/debug delegate readout: GPU.
+Capability probe: webgl2 true, renderer "ANGLE (Apple, ANGLE Metal
+Renderer: Apple M4 Pro...)". This is the decisive datum, not the
+externalImageExts field (which returns [] on every machine regardless
+of driver support, since GL_OES_EGL_image_external is a native GLES
+extension name that WebGL's getSupportedExtensions() never surfaces —
+that field was a weak signal, not evidence). The renderer string
+confirms the ANGLE Metal backend is in play, meaning the whole
+EGL/Android extension family is off the table by construction. Combined
+with delegate: GPU, the shader-log question from earlier today is
+closed on direct observation, not inference.

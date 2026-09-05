@@ -16,6 +16,23 @@ export interface FrameStats {
   timestampMs: number;
   /** False when the model returned no face for this frame. */
   faceDetected: boolean;
+  /**
+   * Wall-clock ms since the previous processed frame, 0 on the first.
+   *
+   * The three fields below exist to tell apart the ways this loop can lose
+   * time, which `fps` alone cannot: an average hides the one 400 ms frame that
+   * is the whole complaint.
+   */
+  sinceLastFrameMs: number;
+  /**
+   * requestAnimationFrame callbacks that fired since the previous processed
+   * frame. Around 2 when a 30 fps camera feeds a 60 Hz display. Much higher
+   * means the loop is alive and the camera has stopped delivering; near zero
+   * across a long gap means the loop itself was descheduled.
+   */
+  rafTicks: number;
+  /** How far video.currentTime advanced since the previous processed frame. */
+  videoTimeDeltaMs: number;
 }
 
 export interface UseFaceLandmarkerOptions extends CreateFaceLandmarkerOptions {
@@ -86,9 +103,13 @@ export function useFaceLandmarker(
     let framesThisSecond = 0;
     let windowStart = performance.now();
     let fps = 0;
+    // Reset on every processed frame, so it counts the ticks spent waiting.
+    let rafTicksSinceFrame = 0;
+    let lastFrameAt: number | null = null;
 
     const tick = () => {
       rafRef.current = requestAnimationFrame(tick);
+      rafTicksSinceFrame += 1;
 
       const video = videoRef.current;
       const landmarker = landmarkerRef.current;
@@ -96,6 +117,8 @@ export function useFaceLandmarker(
       // HAVE_CURRENT_DATA. Before this the element has no frame to read.
       if (video.readyState < 2 || video.videoWidth === 0) return;
       if (video.currentTime === lastVideoTime) return;
+      const videoTimeDeltaMs =
+        lastVideoTime < 0 ? 0 : (video.currentTime - lastVideoTime) * 1000;
       lastVideoTime = video.currentTime;
 
       const timestampMs = performance.now();
@@ -119,11 +142,19 @@ export function useFaceLandmarker(
         windowStart = timestampMs;
       }
 
+      const sinceLastFrameMs = lastFrameAt === null ? 0 : timestampMs - lastFrameAt;
+      lastFrameAt = timestampMs;
+      const rafTicks = rafTicksSinceFrame;
+      rafTicksSinceFrame = 0;
+
       onResultRef.current?.(result, {
         inferenceMs,
         fps,
         timestampMs,
         faceDetected: result.faceLandmarks.length > 0,
+        sinceLastFrameMs,
+        rafTicks,
+        videoTimeDeltaMs,
       });
     };
 

@@ -128,6 +128,52 @@ face in it goes further. Neither can perform a mouthPucker, so **no automated
 check here proves that a real gesture produces a press** on this page. That leg
 needs a face, and the switch meter on the page exists to make it obvious.
 
+### `diagnostics-trace.mjs`: does LoopDiagnostics report what it claims
+
+```sh
+node test-harness/diagnostics-trace.mjs
+```
+
+No browser and no clock, for the same reason as `scan-trace.mjs`. Hands the
+class a stall, a backgrounded tab, a ring-buffer wrap and a camera that stops
+delivering, and reads the numbers back. The case worth knowing about is
+attribution: a gap is measured from the start of one inference to the start of
+the next, so a slow frame's cost lands on the *following* frame, and the panel
+has to name the frame that caused the stall rather than the one that recovered.
+
+### `verify-camera-states.mjs`: does the UI tell the camera states apart
+
+```sh
+node test-harness/verify-camera-states.mjs [http://localhost:3111/board] [shot.png]
+```
+
+Stubs `getUserMedia` per scenario before any app code runs, because none of
+these states can be reached with a real camera on demand. Checks that idle,
+requesting and denied all say different things; that a request which never
+settles reaches `timeout` with a message and an enabled retry rather than
+sitting in `requesting` behind a disabled button; that the retry then succeeds;
+that a stream arriving after the timeout has its tracks stopped instead of
+attaching itself; and that the loop diagnostics panel fills in with live frames.
+
+Written after a real report of "clicking Start camera does nothing and it says
+the camera is off", which the page said for three different states at once.
+
+### `make-fixture-recording.mjs`: a recording to test the viewer with
+
+```sh
+node test-harness/make-fixture-recording.mjs /tmp/fixture.json [seconds]
+```
+
+Generates a synthetic recording, including a stretch with no face in it. This
+exists because the real fixtures were lost with a cleared temp directory, and a
+photograph of a real person is a licensing and privacy decision rather than a
+build one.
+
+Good for `/viewer`, which is a file reader: parsing, plotting, sorting, zooming
+and hovering do not care who produced the numbers. **Never use it for anything
+about the access methods.** The traces are sine waves, so replaying a switch
+over them would measure the generator rather than a face.
+
 ### `serialize-probe.mjs`: what the export costs at the moment it runs
 
 ```sh

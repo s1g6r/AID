@@ -10,7 +10,18 @@ import { loadChromium } from "./playwright.mjs";
 import { readFile, writeFile, stat } from "node:fs/promises";
 
 const URL = process.env.SOAK_URL || "http://localhost:3111/debug";
-const Y4M = process.argv[2];
+/**
+ * Camera source: a path to a .y4m with a face in it, or the literal "fake" for
+ * Chromium's generated colour bars.
+ *
+ * The bars contain no face, so every sample comes back `faceDetected: false`
+ * with `v: null`. That still exercises the detection loop and the recorder at
+ * full cost, which is what makes it a usable regression check for a change to
+ * either, but it cannot say anything about blendshape values. Use a face y4m
+ * when the question is about the numbers rather than the machinery.
+ */
+const CAMERA = process.argv[2];
+const Y4M = CAMERA && CAMERA !== "fake" ? CAMERA : null;
 const OUT = process.argv[3] || "/tmp/soak-result.json";
 const DURATION_MS = Number(process.env.SOAK_MINUTES || 10) * 60_000;
 const POLL_MS = 10_000;
@@ -20,7 +31,7 @@ const chromium = await loadChromium();
 const browser = await chromium.launch({
   args: [
     "--use-fake-device-for-media-stream",
-    `--use-file-for-fake-video-capture=${Y4M}`,
+    ...(Y4M ? [`--use-file-for-fake-video-capture=${Y4M}`] : []),
     "--use-fake-ui-for-media-stream",
     "--autoplay-policy=no-user-gesture-required",
   ],
